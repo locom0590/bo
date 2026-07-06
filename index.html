@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Baş Kontrollü Oyun Merkezi — Boyun Egzersizi</title>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body { width:100%; height:100%; overflow:hidden; font-family:-apple-system,'Segoe UI',Roboto,sans-serif; background:#87CEEB; touch-action:none; }
+  canvas#c { position:fixed; inset:0; width:100%; height:100%; }
+  video { position:absolute; width:1px; height:1px; opacity:0; pointer-events:none; }
+  #camPreview { position:fixed; bottom:12px; left:12px; width:88px; height:66px; border-radius:10px; border:2px solid rgba(255,255,255,.7); object-fit:cover; transform:scaleX(-1); opacity:.85; z-index:50; display:none; }
+
+  .overlay { position:fixed; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:20px; z-index:20;
+             background:linear-gradient(180deg,rgba(40,90,150,.88),rgba(120,180,220,.88)); color:#fff; backdrop-filter:blur(3px); }
+  .overlay.transparent { background:linear-gradient(180deg,rgba(40,90,150,.55),rgba(120,180,220,.45)); }
+  .overlay h1 { font-size:1.8rem; margin-bottom:6px; text-shadow:0 2px 8px rgba(0,0,0,.25); }
+  .overlay .sub { font-size:.92rem; opacity:.95; max-width:440px; line-height:1.45; margin-bottom:14px; }
+  .card { background:rgba(255,255,255,.93); color:#234; border-radius:16px; padding:16px 18px; max-width:440px; width:100%; box-shadow:0 8px 30px rgba(0,0,0,.18); }
+  .card p { font-size:.86rem; line-height:1.5; margin-bottom:6px; text-align:left; }
+  .warn { background:#fff6e0; border-left:4px solid #f0a824; padding:8px 10px; border-radius:6px; font-size:.8rem; text-align:left; color:#6a4a00; margin-top:8px; }
+  button.big { margin-top:14px; padding:14px 32px; font-size:1.05rem; font-weight:700; color:#fff; background:linear-gradient(135deg,#ff8c42,#ff5e62);
+               border:none; border-radius:999px; box-shadow:0 6px 18px rgba(255,94,98,.45); cursor:pointer; }
+  button.big:active { transform:scale(.96); }
+  button.ghost { margin-top:10px; padding:10px 20px; font-size:.88rem; color:#fff; background:rgba(255,255,255,.18); border:1px solid rgba(255,255,255,.55); border-radius:999px; cursor:pointer; }
+
+  /* HUB kartları */
+  #hubCards { display:flex; gap:16px; flex-wrap:wrap; justify-content:center; max-width:640px; }
+  .gameCard { position:relative; width:250px; background:rgba(255,255,255,.94); color:#234; border-radius:18px; padding:20px 16px 26px;
+              box-shadow:0 8px 26px rgba(0,0,0,.22); cursor:pointer; overflow:hidden; border:3px solid transparent; transition:transform .15s, border-color .15s; }
+  .gameCard.hot { transform:scale(1.05); border-color:#ff8c42; }
+  .gameCard .ico { font-size:3rem; }
+  .gameCard h3 { margin:6px 0 4px; color:#1a4a7a; }
+  .gameCard p { font-size:.8rem; line-height:1.4; color:#456; }
+  .gameCard .prog { position:absolute; left:0; bottom:0; height:8px; width:0%; background:linear-gradient(90deg,#ff8c42,#ff5e62); border-radius:0 4px 4px 0; }
+  .dwellable { position:relative; overflow:hidden; }
+  button.dwellable .prog { position:absolute; left:0; bottom:0; height:5px; width:0%; background:rgba(255,255,255,.9); }
+
+  /* HUD */
+  #hud { position:fixed; top:0; left:0; right:0; display:flex; justify-content:space-between; align-items:center; gap:8px; padding:10px 12px; z-index:10; pointer-events:none; }
+  .pill { background:rgba(0,40,80,.5); color:#fff; padding:6px 13px; border-radius:999px; font-weight:700; font-size:.9rem; backdrop-filter:blur(4px); white-space:nowrap; }
+  #pauseBtn { pointer-events:auto; background:rgba(0,40,80,.5); border:none; color:#fff; font-size:1rem; padding:6px 13px; border-radius:999px; cursor:pointer; }
+  #fuelWrap { flex:1; max-width:200px; height:16px; background:rgba(0,40,80,.5); border-radius:999px; overflow:hidden; position:relative; }
+  #fuelBar { height:100%; width:100%; background:linear-gradient(90deg,#ffd23f,#f0a824); transition:width .3s; }
+  #fuelWrap span { position:absolute; inset:0; font-size:.65rem; color:#fff; display:flex; align-items:center; justify-content:center; font-weight:800; text-shadow:0 1px 2px rgba(0,0,0,.5); }
+
+  /* baş imleci (menülerde) */
+  #cursor { position:fixed; width:34px; height:34px; margin:-17px 0 0 -17px; border:3px solid #ff5e62; border-radius:50%; z-index:60;
+            pointer-events:none; display:none; box-shadow:0 0 10px rgba(255,94,98,.7); }
+  #cursor::after { content:''; position:absolute; inset:11px; background:#ff5e62; border-radius:50%; }
+
+  #toast { position:fixed; top:60px; left:50%; transform:translateX(-50%); background:rgba(0,40,80,.78); color:#fff; padding:8px 18px; border-radius:999px;
+           font-size:.9rem; z-index:70; opacity:0; transition:opacity .3s; pointer-events:none; }
+  .stat-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin:12px 0; }
+  .stat { background:#eef6fd; border-radius:10px; padding:9px; }
+  .stat .v { font-size:1.2rem; font-weight:800; color:#1a4a7a; }
+  .stat .l { font-size:.7rem; color:#567; margin-top:2px; }
+  label.opt { display:flex; align-items:center; gap:8px; font-size:.85rem; color:#234; margin-top:6px; text-align:left; }
+  input[type=range] { width:100%; }
+  .hidden { display:none !important; }
+  .ring { width:110px; height:110px; border-radius:50%; border:4px dashed rgba(255,255,255,.9); display:flex; align-items:center; justify-content:center; font-size:2.2rem; margin-bottom:14px; animation:pulse 1.6s infinite; }
+  @keyframes pulse { 0%,100%{transform:scale(1)} 50%{transform:scale(1.08)} }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<video id="video" playsinline></video>
+<video id="camPreview" playsinline muted></video>
+<div id="cursor"></div>
+<div id="toast"></div>
+
+<div id="hud" class="hidden">
+  <span class="pill" id="scorePill">⭐ 0</span>
+  <span class="pill hidden" id="lvlPill">Sv 1</span>
+  <span class="pill hidden" id="timePill">3:00</span>
+  <div id="fuelWrap" class="hidden"><div id="fuelBar"></div><span>⛽ YAKIT</span></div>
+  <button id="pauseBtn">⏸</button>
+</div>
+
+<!-- BAŞLANGIÇ -->
+<div id="startOverlay" class="overlay">
+  <h1>🕹 Baş Kontrollü Oyun Merkezi</h1>
+  <div class="sub">Kronik boyun ağrısı için kinematik egzersiz oyunları. Her şeyi başınla kontrol edersin — menüler dahil.</div>
+  <div class="card">
+    <p>📷 Ön kamera baş hareketini takip eder — telefonu göz hizasında sabit tut.</p>
+    <p>🎯 Menüde imleci bir kartın üzerinde bekleterek seçim yaparsın.</p>
+    <div class="warn">⚠️ Ağrı, baş dönmesi veya bulantı hissedersen hemen ara ver. Bu oyunlar tıbbi tedavinin yerine geçmez; fizyoterapistine danış.</div>
+  </div>
+  <button class="big" id="startBtn">Kameralı Başlat</button>
+  <button class="ghost" id="touchBtn">Kamerasız (dokunmatik) oyna</button>
+</div>
+
+<!-- KALİBRASYON -->
+<div id="calOverlay" class="overlay hidden">
+  <div class="ring">🙂</div>
+  <h1 style="font-size:1.4rem">Kalibrasyon</h1>
+  <div class="sub" id="calMsg">Yüzün aranıyor… Kameraya izin ver ve yüzünü göster.</div>
+  <button class="big hidden" id="calBtn">Düz bakıyorum — Kalibre Et</button>
+  <div class="card" style="margin-top:14px; max-width:340px;">
+    <label class="opt">Hassasiyet <input type="range" id="sens" min="1" max="5" step="0.5" value="2.5"></label>
+    <label class="opt"><input type="checkbox" id="invX"> Yatay ekseni ters çevir</label>
+    <label class="opt"><input type="checkbox" id="invY"> Dikey ekseni ters çevir</label>
+  </div>
+</div>
+
+<!-- HUB -->
+<div id="hubOverlay" class="overlay transparent hidden">
+  <h1>Oyun Seç</h1>
+  <div class="sub">İmleci bir kartın üzerinde tut (veya dokun)</div>
+  <div id="hubCards">
+    <div class="gameCard dwellable" id="cardSky">
+      <div class="ico">🎈</div><h3>Gökyüzü Avcısı</h3>
+      <p>Başınla nişan al, balon ve kuşları hedefte bekleterek patlat. 3 dakikalık seans.</p>
+      <div class="prog"></div>
+    </div>
+    <div class="gameCard dwellable" id="cardPlane">
+      <div class="ico">✈️</div><h3>Halka Pilotu</h3>
+      <p>Uçağı başınla uçur: halkalardan geç, yakıt topla, fırtına bulutlarından kaç!</p>
+      <div class="prog"></div>
+    </div>
+  </div>
+  <button class="ghost" id="recalBtn" style="margin-top:18px">🔄 Yeniden kalibre et</button>
+</div>
+
+<!-- MOLA -->
+<div id="pauseOverlay" class="overlay hidden">
+  <h1>⏸ Mola</h1>
+  <div class="sub">Nefes al, omuzlarını gevşet. Hazır olunca devam et.</div>
+  <button class="big dwellable" id="resumeBtn">Devam Et<div class="prog"></div></button>
+  <button class="ghost dwellable" id="quitBtn">Oyunu Bitir<div class="prog"></div></button>
+</div>
+
+<!-- SONUÇ -->
+<div id="endOverlay" class="overlay hidden">
+  <h1 id="endTitle">🏁 Oturum Bitti</h1>
+  <div class="sub" id="endReason"></div>
+  <div class="card">
+    <div class="stat-grid" id="endStats"></div>
+    <p style="font-size:.78rem;color:#567">Hareket dereceleri kameradan kaba tahmindir, klinik ölçüm değildir. Düzenlilik önemli: haftada 3–5 seans hedefle.</p>
+  </div>
+  <button class="big dwellable" id="againBtn">🔁 Tekrar Oyna<div class="prog"></div></button>
+  <button class="ghost dwellable" id="menuBtn">🏠 Menüye Dön<div class="prog"></div></button>
+</div>
+
+<script>
+"use strict";
+// ==================== ORTAK DURUM ====================
+const S = {
+  mode: null, scene: 'start',            // start|calib|hub|sky|plane|pause|end
+  cross: { x: innerWidth/2, y: innerHeight/2 },
+  raw: { yaw:0, pitch:0 }, cal: { yaw:0, pitch:0.45 },
+  faceSeen:false, calibrated:false,
+  maxDeg: { L:0,R:0,U:0,D:0 },
+  lastGame:null, pausedFrom:null, clouds:[],
+};
+const DWELL_BTN = 1100;
+const $ = id => document.getElementById(id);
+const cv = $('c'), ctx = cv.getContext('2d');
+function resize(){ cv.width=innerWidth*devicePixelRatio; cv.height=innerHeight*devicePixelRatio;
+  cv.style.width=innerWidth+'px'; cv.style.height=innerHeight+'px'; ctx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0); }
+addEventListener('resize', resize); resize();
+for (let i=0;i<7;i++) S.clouds.push({ x:Math.random()*innerWidth, y:Math.random()*innerHeight*.65, s:.5+Math.random(), v:6+Math.random()*10 });
+
+function show(el){ $(el).classList.remove('hidden'); } function hide(el){ $(el).classList.add('hidden'); }
+function toast(msg, ms=1800){ const t=$('toast'); t.textContent=msg; t.style.opacity=1; clearTimeout(t._h); t._h=setTimeout(()=>t.style.opacity=0, ms); }
+function setScene(sc){
+  S.scene = sc;
+  ['startOverlay','calOverlay','hubOverlay','pauseOverlay','endOverlay'].forEach(hide);
+  hide('hud');
+  if (sc==='start') show('startOverlay');
+  if (sc==='calib') show('calOverlay');
+  if (sc==='hub')   show('hubOverlay');
+  if (sc==='pause') show('pauseOverlay');
+  if (sc==='end')   show('endOverlay');
+  if (sc==='sky' || sc==='plane') show('hud');
+  $('cursor').style.display = (S.mode==='cam' && ['hub','pause','end'].includes(sc)) ? 'block' : 'none';
+  document.querySelectorAll('.dwellable').forEach(el=>{ el._d=0; const p=el.querySelector('.prog'); if(p)p.style.width='0%'; });
+}
+
+// ==================== SES ====================
+let AC=null;
+function tone(freq, dur=.18, vol=.25, slide=2.2){ try{ AC=AC||new (window.AudioContext||window.webkitAudioContext)();
+  const o=AC.createOscillator(), g=AC.createGain(); o.connect(g); g.connect(AC.destination);
+  o.frequency.setValueAtTime(freq, AC.currentTime); o.frequency.exponentialRampToValueAtTime(Math.max(40,freq*slide), AC.currentTime+dur*.5);
+  g.gain.setValueAtTime(vol, AC.currentTime); g.gain.exponentialRampToValueAtTime(.001, AC.currentTime+dur);
+  o.start(); o.stop(AC.currentTime+dur+.02);}catch(e){} }
+
+// ==================== YÜZ TAKİBİ ====================
+let faceMesh=null, camera=null;
+function ema(p,n,a){ return p+(n-p)*a; }
+function onResults(res){
+  if (!res.multiFaceLandmarks || !res.multiFaceLandmarks.length){ S.faceSeen=false; return; }
+  S.faceSeen=true;
+  const lm=res.multiFaceLandmarks[0], L=lm[234], R=lm[454], N=lm[1], F=lm[10], C=lm[152];
+  S.raw.yaw   = ema(S.raw.yaw,   (N.x-L.x)/Math.max(1e-6,(R.x-L.x)), .35);
+  S.raw.pitch = ema(S.raw.pitch, (N.y-F.y)/Math.max(1e-6,(C.y-F.y)), .35);
+  if (!S.calibrated) return;
+  const sens = parseFloat($('sens').value);
+  let dx = S.raw.yaw - S.cal.yaw, dy = S.raw.pitch - S.cal.pitch;
+  if ($('invX').checked) dx=-dx;
+  if ($('invY').checked) dy=-dy;
+  S.cross.x = Math.max(10, Math.min(innerWidth-10,  innerWidth/2  + (-dx)*sens*innerWidth));
+  S.cross.y = Math.max(10, Math.min(innerHeight-10, innerHeight/2 + ( dy)*sens*innerHeight));
+  const yd = dx*90, pd = dy*90;
+  if (yd<0) S.maxDeg.R=Math.max(S.maxDeg.R,-yd); else S.maxDeg.L=Math.max(S.maxDeg.L,yd);
+  if (pd<0) S.maxDeg.U=Math.max(S.maxDeg.U,-pd); else S.maxDeg.D=Math.max(S.maxDeg.D,pd);
+}
+async function startCamera(){
+  const video=$('video');
+  faceMesh = new FaceMesh({ locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${f}` });
+  faceMesh.setOptions({ maxNumFaces:1, refineLandmarks:false, minDetectionConfidence:.5, minTrackingConfidence:.5 });
+  faceMesh.onResults(onResults);
+  camera = new Camera(video, { onFrame: async()=>{ await faceMesh.send({image:video}); }, width:480, height:360, facingMode:'user' });
+  await camera.start();
+  const prev=$('camPreview'); prev.srcObject=video.srcObject; prev.style.display='block'; prev.play().catch(()=>{});
+}
+
+// ==================== BAŞ İMLECİ + DWELL BUTONLAR ====================
+function updateCursorUI(dt){
+  if (S.mode!=='cam' || !['hub','pause','end'].includes(S.scene)) return;
+  const cur=$('cursor'); cur.style.left=S.cross.x+'px'; cur.style.top=S.cross.y+'px';
+  document.querySelectorAll('.overlay:not(.hidden) .dwellable').forEach(el=>{
+    const r = el.getBoundingClientRect();
+    const inside = S.cross.x>r.left && S.cross.x<r.right && S.cross.y>r.top && S.cross.y<r.bottom;
+    el._d = inside ? (el._d||0)+dt*1000 : Math.max(0,(el._d||0)-dt*2500);
+    el.classList.toggle('hot', inside);
+    const p = el.querySelector('.prog'); if (p) p.style.width = Math.min(100, 100*el._d/DWELL_BTN)+'%';
+    if (el._d >= DWELL_BTN){ el._d=0; if(p)p.style.width='0%'; tone(700,.12,.2,1.5); el.click(); }
+  });
+}
+
+// ==================== ARKA PLAN ====================
+function drawSkyBg(dt, horizon=1){
+  const w=innerWidth, h=innerHeight;
+  const g=ctx.createLinearGradient(0,0,0,h);
+  g.addColorStop(0,'#4A90D9'); g.addColorStop(.6,'#87CEEB'); g.addColorStop(1,'#d6effa');
+  ctx.fillStyle=g; ctx.fillRect(0,0,w,h);
+  ctx.fillStyle='rgba(255,244,180,.95)'; ctx.beginPath(); ctx.arc(w*.85,h*.13,34,0,7); ctx.fill();
+  ctx.fillStyle='rgba(255,255,255,.85)';
+  for (const c of S.clouds){
+    c.x+=c.v*dt; if (c.x>w+90){ c.x=-90; c.y=Math.random()*h*.65; }
+    ctx.beginPath(); ctx.arc(c.x,c.y,22*c.s,0,7); ctx.arc(c.x+20*c.s,c.y-10*c.s,18*c.s,0,7); ctx.arc(c.x+40*c.s,c.y,20*c.s,0,7); ctx.fill();
+  }
+  if (horizon<1){ // deniz (uçak oyunu)
+    const hy=h*horizon;
+    const sg=ctx.createLinearGradient(0,hy,0,h);
+    sg.addColorStop(0,'#2e7fb8'); sg.addColorStop(1,'#155a8a');
+    ctx.fillStyle=sg; ctx.fillRect(0,hy,w,h-hy);
+    ctx.strokeStyle='rgba(255,255,255,.25)'; ctx.lineWidth=1;
+    for(let i=1;i<5;i++){ ctx.beginPath(); ctx.moveTo(0,hy+(h-hy)*i/5); ctx.lineTo(w,hy+(h-hy)*i/5); ctx.stroke(); }
+  }
+}
+
+// ==================== OYUN 1: GÖKYÜZÜ AVCISI ====================
+const sky = { running:false, score:0, hits:0, spawned:0, level:1, timeLeft:180, spread:.28, targets:[], fx:[], lastSpawn:0 };
+const SKY_DWELL=800, SKY_LIFE=9000;
+function skyBegin(){
+  Object.assign(sky,{ running:true, score:0, hits:0, spawned:0, level:1, timeLeft:180, spread:.28, targets:[], fx:[], lastSpawn:0 });
+  S.maxDeg={L:0,R:0,U:0,D:0}; S.lastGame='sky';
+  $('lvlPill').textContent='Sv 1'; show('lvlPill'); show('timePill'); hide('fuelWrap');
+  setScene('sky'); toast('Nişangahı hedefin üstünde tut 🎯');
+}
+function skySpawn(){
+  if (sky.targets.length>=2) return;
+  const cx=innerWidth/2, cy=innerHeight/2, maxR=Math.min(innerWidth,innerHeight)*sky.spread;
+  const a=Math.random()*Math.PI*2, r=maxR*(.45+Math.random()*.55), m=60;
+  const isBird = sky.level>=2 && Math.random()<.35;
+  sky.targets.push({ x:Math.max(m,Math.min(innerWidth-m, cx+Math.cos(a)*r*1.25)),
+    y:Math.max(m+50,Math.min(innerHeight-m, cy+Math.sin(a)*r)),
+    r:isBird?34:40, type:isBird?'bird':'balloon', hue:200+Math.random()*160,
+    born:performance.now(), dwell:0, vx:isBird?(Math.random()<.5?-1:1)*(28+sky.level*7):0, vy:isBird?0:-6, wob:Math.random()*7 });
+  sky.spawned++;
+}
+function skyUpdate(dt, now){
+  sky.timeLeft-=dt;
+  if (sky.timeLeft<=0){ skyEnd(); return; }
+  const m=Math.floor(sky.timeLeft/60), s=Math.floor(sky.timeLeft%60);
+  $('timePill').textContent=m+':'+String(s).padStart(2,'0');
+  $('scorePill').textContent='⭐ '+sky.score;
+  for (let i=sky.targets.length-1;i>=0;i--){
+    const t=sky.targets[i];
+    t.wob+=dt*2; t.x+=t.vx*dt; t.y+=t.vy*dt+Math.sin(t.wob)*.25;
+    if (t.type==='bird' && (t.x<50||t.x>innerWidth-50)) t.vx=-t.vx;
+    const d=Math.hypot(S.cross.x-t.x, S.cross.y-t.y);
+    t.dwell = d<t.r+14 ? t.dwell+dt*1000 : Math.max(0,t.dwell-dt*1600);
+    if (t.dwell>=SKY_DWELL){
+      sky.hits++; sky.score+= t.type==='bird'?15:10; tone(t.type==='bird'?800:550);
+      for(let p=0;p<14;p++) sky.fx.push({x:t.x,y:t.y,vx:(Math.random()-.5)*260,vy:(Math.random()-.7)*260,life:.6,hue:t.hue});
+      sky.targets.splice(i,1);
+      if (sky.hits%5===0){ sky.level++; sky.spread=Math.min(.46,sky.spread+.035); $('lvlPill').textContent='Sv '+sky.level; toast('🎉 Seviye '+sky.level+' — daha geniş alan!'); }
+      continue;
+    }
+    if (now-t.born>SKY_LIFE) sky.targets.splice(i,1);
+  }
+  if (now-sky.lastSpawn > (sky.targets.length?2600:900)-sky.level*120){ skySpawn(); sky.lastSpawn=now; }
+}
+function skyDraw(dt){
+  drawSkyBg(dt);
+  for (const t of sky.targets){
+    ctx.save(); ctx.translate(t.x,t.y);
+    if (t.type==='balloon'){
+      ctx.strokeStyle='rgba(90,60,30,.5)'; ctx.beginPath(); ctx.moveTo(0,t.r*.95); ctx.quadraticCurveTo(6,t.r*1.5,0,t.r*1.9); ctx.stroke();
+      const bg=ctx.createRadialGradient(-t.r*.3,-t.r*.35,4,0,0,t.r);
+      bg.addColorStop(0,`hsl(${t.hue} 90% 78%)`); bg.addColorStop(1,`hsl(${t.hue} 75% 55%)`);
+      ctx.fillStyle=bg; ctx.beginPath(); ctx.ellipse(0,0,t.r*.85,t.r,0,0,7); ctx.fill();
+      ctx.fillStyle=`hsl(${t.hue} 75% 45%)`; ctx.beginPath(); ctx.moveTo(-6,t.r*.92); ctx.lineTo(6,t.r*.92); ctx.lineTo(0,t.r*1.08); ctx.fill();
+    } else {
+      ctx.font=`${t.r*1.6}px serif`; ctx.textAlign='center'; ctx.textBaseline='middle';
+      ctx.save(); if(t.vx<0)ctx.scale(-1,1); ctx.fillText('🐦',0,0); ctx.restore();
+    }
+    if (t.dwell>0){ ctx.strokeStyle='#fff'; ctx.lineWidth=5; ctx.globalAlpha=.9;
+      ctx.beginPath(); ctx.arc(0,0,t.r+12,-Math.PI/2,-Math.PI/2+(t.dwell/SKY_DWELL)*Math.PI*2); ctx.stroke(); ctx.globalAlpha=1; }
+    ctx.restore();
+  }
+  drawFx(sky.fx, dt);
+  drawCrosshair();
+}
+function skyEnd(){
+  sky.running=false;
+  endScreen('🏁 Oturum Bitti','',[
+    ['Puan',sky.score],['Patlatılan',sky.hits],
+    ['İsabet', sky.spawned?Math.round(100*sky.hits/sky.spawned)+'%':'—'],['Seviye',sky.level],
+    ['Rotasyon sol/sağ', rotStr('LR')],['Aşağı/yukarı', rotStr('DU')],
+  ]);
+}
+
+// ==================== OYUN 2: HALKA PİLOTU ====================
+const pl = { running:false, crashed:false, score:0, rings:0, fuelGot:0, t:0, fuel:100,
+  x:0, y:0, bank:0, objs:[], fx:[], lastRing:0, lastFuel:0, lastObs:0, speed:9, crashTimer:0, reason:'' };
+const HORIZON=.42, HALF=.42;
+function pw(){ return innerWidth*HALF; }
+function planeBegin(){
+  Object.assign(pl,{ running:true, crashed:false, score:0, rings:0, fuelGot:0, t:0, fuel:100,
+    x:innerWidth/2, y:innerHeight*.62, bank:0, objs:[], fx:[], lastRing:0, lastFuel:0, lastObs:0, speed:9, crashTimer:0, reason:'' });
+  S.maxDeg={L:0,R:0,U:0,D:0}; S.lastGame='plane';
+  hide('lvlPill'); hide('timePill'); show('fuelWrap');
+  $('fuelBar').style.width='100%';
+  setScene('plane'); toast('✈️ Halkalardan geç, yakıt topla, bulutlardan kaç!');
+}
+function plSpawn(type){
+  const o = { type, z:26, wx:(Math.random()*1.5-0.75), wy:(Math.random()*1.15-0.55) };
+  if (type==='ring') o.r=.20;
+  if (type==='fuel'){ o.r=.15; o.wy=Math.random()*0.9-0.4; }
+  if (type==='obs'){ o.r=.14; o.spin=Math.random()*7; }
+  pl.objs.push(o);
+}
+function planeUpdate(dt){
+  if (pl.crashed){ // düşüş animasyonu
+    pl.crashTimer+=dt; pl.y+=dt*380*pl.crashTimer; pl.bank+=dt*4;
+    for(let i=0;i<2;i++) pl.fx.push({x:pl.x+(Math.random()-.5)*30, y:pl.y-10, vx:(Math.random()-.5)*60, vy:-80+Math.random()*40, life:.8, hue:20+Math.random()*30});
+    if (pl.crashTimer>1.6) planeEnd();
+    return;
+  }
+  pl.t+=dt; pl.speed = 9 + pl.t*.12;
+  pl.score += dt*2;
+  // yakıt
+  pl.fuel -= dt*(100/50); // dolu depo ~50 sn
+  $('fuelBar').style.width=Math.max(0,pl.fuel)+'%';
+  $('fuelBar').style.background = pl.fuel<25 ? 'linear-gradient(90deg,#ff5e62,#d43)' : 'linear-gradient(90deg,#ffd23f,#f0a824)';
+  if (pl.fuel<=0){ crash('⛽ Yakıt bitti!'); return; }
+  $('scorePill').textContent='⭐ '+Math.floor(pl.score);
+  // uçak, baş imlecini takip eder
+  const tx=S.cross.x, ty=Math.max(innerHeight*.18,Math.min(innerHeight*.9,S.cross.y));
+  const ox=pl.x;
+  pl.x=ema(pl.x,tx,.12); pl.y=ema(pl.y,ty,.12);
+  pl.bank=ema(pl.bank,(pl.x-ox)*.06,.2);
+  // spawn zamanlaması
+  if (pl.t-pl.lastRing > Math.max(1.6, 2.6-pl.t*.02)){ plSpawn('ring'); pl.lastRing=pl.t; }
+  if (pl.t-pl.lastFuel > 9){ plSpawn('fuel'); pl.lastFuel=pl.t; }
+  if (pl.t>6 && pl.t-pl.lastObs > Math.max(1.8, 4.5-pl.t*.05)){ plSpawn('obs'); pl.lastObs=pl.t; }
+  // nesneler yaklaşır
+  const pwx=(pl.x-innerWidth/2)/pw(), pwy=(pl.y-innerHeight*HORIZON)/pw();
+  for (let i=pl.objs.length-1;i>=0;i--){
+    const o=pl.objs[i]; const zPrev=o.z; o.z-=pl.speed*dt;
+    if (o.spin!==undefined) o.spin+=dt*2;
+    if (zPrev>1 && o.z<=1){ // uçak düzleminden geçiş anı
+      const d=Math.hypot(o.wx-pwx, o.wy-pwy);
+      if (o.type==='ring'){
+        if (d<o.r){ pl.rings++; pl.score+=25; tone(880,.2,.3,1.6); burst(pl.x,pl.y); toast('✔ Halka! +25',700); }
+      } else if (o.type==='fuel'){
+        if (d<o.r+.08){ pl.fuelGot++; pl.fuel=Math.min(100,pl.fuel+32); tone(520,.25,.3,1.3); toast('⛽ +Yakıt',700); }
+      } else if (o.type==='obs'){
+        if (d<o.r+.07){ crash('🌩 Engele çarptın!'); return; }
+      }
+    }
+    if (o.z<=0.35) pl.objs.splice(i,1);
+  }
+}
+function crash(reason){
+  pl.crashed=true; pl.crashTimer=0; pl.reason=reason;
+  tone(180,.6,.4,.4); toast(reason);
+}
+function burst(x,y){ for(let p=0;p<15;p++) pl.fx.push({x,y,vx:(Math.random()-.5)*300,vy:(Math.random()-.8)*300,life:.5,hue:45}); }
+function project(o){
+  const s=1/o.z;
+  return { x: innerWidth/2 + o.wx*pw()*s, y: innerHeight*HORIZON + o.wy*pw()*s, s };
+}
+function planeDraw(dt){
+  drawSkyBg(dt, .62);
+  const sorted=[...pl.objs].sort((a,b)=>b.z-a.z); // uzaktan yakına
+  for (const o of sorted){
+    const p=project(o), R=Math.max(4, o.r*pw()*p.s);
+    ctx.save(); ctx.translate(p.x,p.y);
+    if (o.type==='ring'){
+      ctx.lineWidth=Math.max(3,R*.22);
+      ctx.strokeStyle = o.z<4 ? '#ffd23f' : 'rgba(255,210,63,.75)';
+      ctx.shadowColor='#ffd23f'; ctx.shadowBlur= o.z<4?18:0;
+      ctx.beginPath(); ctx.ellipse(0,0,R,R*1.06,0,0,7); ctx.stroke();
+      ctx.shadowBlur=0;
+    } else if (o.type==='fuel'){
+      const s2=R/22; ctx.scale(s2,s2);
+      ctx.fillStyle='#e63946'; ctx.fillRect(-14,-18,28,36);
+      ctx.strokeStyle='rgba(0,0,0,.25)'; ctx.strokeRect(-14,-18,28,36);
+      ctx.font='20px sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText('⛽',0,2);
+    } else {
+      ctx.rotate(Math.sin(o.spin)*.15);
+      const s2=R/26; ctx.scale(s2,s2);
+      ctx.fillStyle='#5a6472';
+      ctx.beginPath(); ctx.arc(-16,4,16,0,7); ctx.arc(2,-8,20,0,7); ctx.arc(20,6,15,0,7); ctx.fill();
+      ctx.fillStyle='#ffd23f'; ctx.font='bold 22px sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText('⚡',2,16);
+    }
+    ctx.restore();
+  }
+  drawFx(pl.fx, dt);
+  drawPlane(pl.x,pl.y,pl.bank);
+}
+function drawPlane(x,y,bank){
+  ctx.save(); ctx.translate(x,y); ctx.rotate(bank);
+  ctx.fillStyle='rgba(0,0,0,.12)'; ctx.beginPath(); ctx.ellipse(0,26,44,7,0,0,7); ctx.fill();
+  // kanatlar
+  ctx.fillStyle='#e63946';
+  ctx.beginPath(); ctx.moveTo(-78,4); ctx.lineTo(-12,-4); ctx.lineTo(12,-4); ctx.lineTo(78,4); ctx.lineTo(70,10); ctx.lineTo(-70,10); ctx.closePath(); ctx.fill();
+  // dikey kuyruk
+  ctx.fillStyle='#d62839'; ctx.beginPath(); ctx.moveTo(-3,-6); ctx.lineTo(0,-30); ctx.lineTo(6,-6); ctx.closePath(); ctx.fill();
+  // yatay stabilizatör
+  ctx.fillStyle='#e63946'; ctx.beginPath(); ctx.moveTo(-26,-8); ctx.lineTo(26,-8); ctx.lineTo(20,-3); ctx.lineTo(-20,-3); ctx.closePath(); ctx.fill();
+  // gövde
+  const g=ctx.createRadialGradient(0,-4,2,0,0,16);
+  g.addColorStop(0,'#fff'); g.addColorStop(1,'#c8ccd4');
+  ctx.fillStyle=g; ctx.beginPath(); ctx.ellipse(0,0,11,15,0,0,7); ctx.fill();
+  ctx.strokeStyle='rgba(0,0,0,.2)'; ctx.stroke();
+  ctx.restore();
+}
+function planeEnd(){
+  pl.running=false;
+  endScreen('💥 Uçak Düştü', pl.reason, [
+    ['Puan',Math.floor(pl.score)],['Geçilen halka',pl.rings],
+    ['Havada kalma', Math.floor(pl.t)+' sn'],['Toplanan yakıt',pl.fuelGot],
+    ['Rotasyon sol/sağ', rotStr('LR')],['Aşağı/yukarı', rotStr('DU')],
+  ]);
+}
+
+// ==================== ORTAK ÇİZİMLER ====================
+function drawFx(list, dt){
+  for (let i=list.length-1;i>=0;i--){ const p=list[i];
+    p.x+=p.vx*dt; p.y+=p.vy*dt; p.vy+=300*dt; p.life-=dt;
+    if (p.life<=0){ list.splice(i,1); continue; }
+    ctx.globalAlpha=Math.max(0,p.life/.6); ctx.fillStyle=`hsl(${p.hue} 85% 60%)`;
+    ctx.beginPath(); ctx.arc(p.x,p.y,4,0,7); ctx.fill(); ctx.globalAlpha=1;
+  }
+}
+function drawCrosshair(){
+  const {x,y}=S.cross;
+  ctx.strokeStyle='rgba(255,60,60,.95)'; ctx.lineWidth=3;
+  ctx.beginPath(); ctx.arc(x,y,16,0,7); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(x-26,y); ctx.lineTo(x-8,y); ctx.moveTo(x+8,y); ctx.lineTo(x+26,y);
+  ctx.moveTo(x,y-26); ctx.lineTo(x,y-8); ctx.moveTo(x,y+8); ctx.lineTo(x,y+26); ctx.stroke();
+  ctx.fillStyle='rgba(255,60,60,.95)'; ctx.beginPath(); ctx.arc(x,y,3,0,7); ctx.fill();
+}
+function rotStr(k){
+  if (S.mode!=='cam') return '—';
+  return k==='LR' ? Math.round(S.maxDeg.L)+'° / '+Math.round(S.maxDeg.R)+'°'
+                  : Math.round(S.maxDeg.D)+'° / '+Math.round(S.maxDeg.U)+'°';
+}
+function noFaceBanner(){
+  if (S.mode==='cam' && !S.faceSeen && ['sky','plane'].includes(S.scene)){
+    const w=innerWidth,h=innerHeight;
+    ctx.fillStyle='rgba(0,40,80,.6)'; ctx.fillRect(0,h/2-24,w,48);
+    ctx.fillStyle='#fff'; ctx.font='16px sans-serif'; ctx.textAlign='center';
+    ctx.fillText('Yüz bulunamadı — kameraya bak 📷', w/2, h/2+6);
+  }
+}
+
+// ==================== SONUÇ EKRANI ====================
+function endScreen(title, reason, stats){
+  $('endTitle').textContent=title;
+  $('endReason').textContent=reason;
+  $('endStats').innerHTML = stats.map(([l,v])=>`<div class="stat"><div class="v">${v}</div><div class="l">${l}</div></div>`).join('');
+  setScene('end');
+}
+
+// ==================== ANA DÖNGÜ ====================
+let lastT=0;
+function loop(now){
+  requestAnimationFrame(loop);
+  const dt=Math.min(.05,(now-lastT)/1000); lastT=now;
+  updateCursorUI(dt);
+  if (S.scene==='sky' && sky.running){ skyUpdate(dt,now); if(sky.running && S.scene==='sky'){ skyDraw(dt); noFaceBanner(); } }
+  else if (S.scene==='plane' && (pl.running||pl.crashed)){ planeUpdate(dt); if(S.scene==='plane'){ planeDraw(dt); noFaceBanner(); } }
+  else drawSkyBg(dt);
+}
+requestAnimationFrame(loop);
+
+// ==================== AKIŞ / BUTONLAR ====================
+$('startBtn').onclick = async () => {
+  S.mode='cam'; setScene('calib');
+  try { await startCamera(); }
+  catch(e){
+    $('calMsg').textContent='Kameraya erişilemedi ('+(e.name||'hata')+'). Tarayıcı izni ve HTTPS gerekli. Dokunmatik moda geçebilirsin.';
+    const b=$('calBtn'); b.classList.remove('hidden'); b.textContent='Dokunmatik modda oyna'; b.onclick=startTouch; return;
+  }
+  const wait=setInterval(()=>{ if (S.faceSeen){ clearInterval(wait);
+    $('calMsg').textContent='Yüz bulundu ✅ Başını dik ve rahat tut, karşıya bak, sonra butona bas.'; show('calBtn'); } },300);
+};
+$('calBtn').onclick = () => { S.cal.yaw=S.raw.yaw; S.cal.pitch=S.raw.pitch; S.calibrated=true; setScene('hub'); };
+function startTouch(){ S.mode='touch'; S.calibrated=true; setScene('hub'); toast('Dokunmatik mod: parmağınla oyna, kartlara dokun'); }
+$('touchBtn').onclick=startTouch;
+
+$('cardSky').onclick = () => skyBegin();
+$('cardPlane').onclick = () => planeBegin();
+$('recalBtn').onclick = () => {
+  if (S.mode!=='cam'){ toast('Dokunmatik moddasın'); return; }
+  setScene('calib'); $('calMsg').textContent='Başını dik tut, karşıya bak ve butona bas.'; show('calBtn');
+};
+
+function pointAt(ev){ if (S.mode!=='touch') return;
+  const p=ev.touches?ev.touches[0]:ev; S.cross.x=p.clientX; S.cross.y=p.clientY; }
+addEventListener('touchmove',pointAt,{passive:true});
+addEventListener('touchstart',pointAt,{passive:true});
+addEventListener('mousemove',pointAt);
+
+$('pauseBtn').onclick = () => { if (['sky','plane'].includes(S.scene)){ S.pausedFrom=S.scene; setScene('pause'); } };
+$('resumeBtn').onclick = () => setScene(S.pausedFrom);
+$('quitBtn').onclick = () => { if (S.pausedFrom==='sky') skyEnd(); else { pl.crashed=false; planeEnd(); } };
+$('againBtn').onclick = () => { S.lastGame==='sky' ? skyBegin() : planeBegin(); };
+$('menuBtn').onclick = () => setScene('hub');
+</script>
+</body>
+</html>
