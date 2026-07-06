@@ -1,0 +1,1513 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Boyun Egzersiz Oyun Merkezi</title>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body { width:100%; height:100%; overflow:hidden; font-family:-apple-system,'Segoe UI',Roboto,sans-serif; background:#87CEEB; touch-action:none; }
+  canvas#c { position:fixed; inset:0; width:100%; height:100%; }
+  canvas#v { position:fixed; inset:0; width:100%; height:100%; display:none; background:#000; }
+  video { position:absolute; width:1px; height:1px; opacity:0; pointer-events:none; }
+  #camPreview { position:fixed; bottom:12px; left:12px; width:88px; height:66px; border-radius:10px; border:2px solid rgba(255,255,255,.7); object-fit:cover; transform:scaleX(-1); opacity:.85; z-index:50; display:none; }
+
+  .overlay { position:fixed; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:20px; z-index:20;
+             background:linear-gradient(180deg,rgba(40,90,150,.9),rgba(120,180,220,.9)); color:#fff; backdrop-filter:blur(3px); overflow-y:auto; }
+  .overlay.transparent { background:linear-gradient(180deg,rgba(40,90,150,.55),rgba(120,180,220,.45)); }
+  .overlay h1 { font-size:1.7rem; margin-bottom:6px; text-shadow:0 2px 8px rgba(0,0,0,.25); }
+  .overlay .sub { font-size:.9rem; opacity:.95; max-width:440px; line-height:1.45; margin-bottom:12px; }
+  .card { background:rgba(255,255,255,.93); color:#234; border-radius:16px; padding:14px 16px; max-width:440px; width:100%; box-shadow:0 8px 30px rgba(0,0,0,.18); }
+  .card p { font-size:.85rem; line-height:1.5; margin-bottom:6px; text-align:left; }
+  .warn { background:#fff6e0; border-left:4px solid #f0a824; padding:8px 10px; border-radius:6px; font-size:.78rem; text-align:left; color:#6a4a00; margin-top:8px; }
+  button.big { margin-top:12px; padding:13px 30px; font-size:1.02rem; font-weight:700; color:#fff; background:linear-gradient(135deg,#ff8c42,#ff5e62);
+               border:none; border-radius:999px; box-shadow:0 6px 18px rgba(255,94,98,.45); cursor:pointer; }
+  button.big:active { transform:scale(.96); }
+  button.ghost { margin-top:10px; padding:9px 18px; font-size:.86rem; color:#fff; background:rgba(255,255,255,.18); border:1px solid rgba(255,255,255,.55); border-radius:999px; cursor:pointer; }
+
+  /* kartlar */
+  #modeCards, #hubCards { display:flex; gap:14px; flex-wrap:wrap; justify-content:center; max-width:680px; }
+  .gameCard { position:relative; background:rgba(255,255,255,.94); color:#234; border-radius:16px; padding:14px 10px 20px;
+              box-shadow:0 8px 26px rgba(0,0,0,.22); cursor:pointer; overflow:hidden; border:3px solid transparent; transition:transform .15s, border-color .15s; }
+  #modeCards .gameCard { width:220px; padding:22px 14px 26px; }
+  #hubCards .gameCard { width:150px; }
+  .gameCard.hot { transform:scale(1.06); border-color:#ff8c42; }
+  .gameCard .ico { font-size:2.4rem; }
+  #modeCards .ico { font-size:3rem; }
+  .gameCard h3 { margin:5px 0 3px; color:#1a4a7a; font-size:.92rem; }
+  #modeCards h3 { font-size:1.1rem; }
+  .gameCard p { font-size:.7rem; line-height:1.35; color:#456; }
+  .gameCard .prog { position:absolute; left:0; bottom:0; height:7px; width:0%; background:linear-gradient(90deg,#ff8c42,#ff5e62); border-radius:0 4px 4px 0; }
+  .dwellable { position:relative; overflow:hidden; }
+  button.dwellable .prog { position:absolute; left:0; bottom:0; height:5px; width:0%; background:rgba(255,255,255,.9); }
+  .tag { display:inline-block; font-size:.62rem; background:#e8f2fb; color:#1a4a7a; border-radius:999px; padding:2px 8px; margin-top:5px; font-weight:700; }
+
+  /* HUD */
+  #hud { position:fixed; top:0; left:0; right:0; display:flex; justify-content:space-between; align-items:center; gap:6px; padding:10px 12px; z-index:10; pointer-events:none; }
+  .pill { background:rgba(0,40,80,.5); color:#fff; padding:6px 12px; border-radius:999px; font-weight:700; font-size:.86rem; backdrop-filter:blur(4px); white-space:nowrap; }
+  #pauseBtn { pointer-events:auto; background:rgba(0,40,80,.5); border:none; color:#fff; font-size:1rem; padding:6px 12px; border-radius:999px; cursor:pointer; }
+  #fuelWrap { flex:1; max-width:180px; height:16px; background:rgba(0,40,80,.5); border-radius:999px; overflow:hidden; position:relative; }
+  #fuelBar { height:100%; width:100%; background:linear-gradient(90deg,#ffd23f,#f0a824); transition:width .3s; }
+  #fuelWrap span { position:absolute; inset:0; font-size:.62rem; color:#fff; display:flex; align-items:center; justify-content:center; font-weight:800; text-shadow:0 1px 2px rgba(0,0,0,.5); }
+
+  #cursor { position:fixed; width:34px; height:34px; margin:-17px 0 0 -17px; border:3px solid #ff5e62; border-radius:50%; z-index:60;
+            pointer-events:none; display:none; box-shadow:0 0 10px rgba(255,94,98,.7); }
+  #cursor::after { content:''; position:absolute; inset:11px; background:#ff5e62; border-radius:50%; }
+
+  #toast { position:fixed; top:60px; left:50%; transform:translateX(-50%); background:rgba(0,40,80,.78); color:#fff; padding:8px 18px; border-radius:999px;
+           font-size:.88rem; z-index:70; opacity:0; transition:opacity .3s; pointer-events:none; max-width:90vw; }
+  .stat-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin:12px 0; }
+  .stat { background:#eef6fd; border-radius:10px; padding:9px; }
+  .stat .v { font-size:1.15rem; font-weight:800; color:#1a4a7a; }
+  .stat .l { font-size:.68rem; color:#567; margin-top:2px; }
+  label.opt { display:flex; align-items:center; gap:8px; font-size:.85rem; color:#234; margin-top:6px; text-align:left; }
+  input[type=range] { width:100%; }
+  .hidden { display:none !important; }
+  .ring { width:100px; height:100px; border-radius:50%; border:4px dashed rgba(255,255,255,.9); display:flex; align-items:center; justify-content:center; font-size:2rem; margin-bottom:12px; animation:pulse 1.6s infinite; }
+  @keyframes pulse { 0%,100%{transform:scale(1)} 50%{transform:scale(1.08)} }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<canvas id="v"></canvas>
+<video id="video" playsinline></video>
+<video id="camPreview" playsinline muted></video>
+<div id="cursor"></div>
+<div id="toast"></div>
+
+<div id="hud" class="hidden">
+  <span class="pill" id="scorePill">⭐ 0</span>
+  <span class="pill hidden" id="infoPill"></span>
+  <span class="pill hidden" id="timePill">3:00</span>
+  <div id="fuelWrap" class="hidden"><div id="fuelBar"></div><span>⛽ YAKIT</span></div>
+  <button id="pauseBtn">⏸</button>
+</div>
+
+<!-- MOD SEÇİMİ -->
+<div id="modeOverlay" class="overlay">
+  <h1>🕹 Boyun Egzersiz Oyun Merkezi</h1>
+  <div class="sub">Kronik boyun ağrısı için kinematik egzersiz oyunları. Nasıl oynayacaksın?</div>
+  <div id="modeCards">
+    <div class="gameCard" id="modePhone">
+      <div class="ico">📱</div><h3>Telefon</h3>
+      <p>Ön kamera baş hareketini takip eder. 7 farklı oyun: nişan, takip, denge, ritim…</p>
+    </div>
+    <div class="gameCard" id="modeVR">
+      <div class="ico">🥽</div><h3>VR Box</h3>
+      <p>Telefonu VR gözlüğe tak. Jiroskop + stereo 3D ile 360° oyunlar. En geniş hareket açıklığı.</p>
+    </div>
+  </div>
+  <div class="warn" style="max-width:440px">⚠️ Ağrı, baş dönmesi veya bulantı hissedersen hemen ara ver. Bu oyunlar tıbbi tedavinin yerine geçmez; fizyoterapistine danış. VR seanslarını 5–10 dakikayla sınırla.</div>
+</div>
+
+<!-- TELEFON: KAMERA/DOKUNMATİK -->
+<div id="phoneStartOverlay" class="overlay hidden">
+  <h1>📱 Telefon Modu</h1>
+  <div class="sub">Kamera baş hareketini takip eder; menüler dahil her şeyi başınla kontrol edersin. Telefonu göz hizasında sabit tut.</div>
+  <button class="big" id="startBtn">📷 Kameralı Başlat</button>
+  <button class="ghost" id="touchBtn">Kamerasız (dokunmatik) oyna</button>
+  <button class="ghost" id="backModeBtn">← Geri</button>
+</div>
+
+<!-- KALİBRASYON -->
+<div id="calOverlay" class="overlay hidden">
+  <div class="ring">🙂</div>
+  <h1 style="font-size:1.4rem">Kalibrasyon</h1>
+  <div class="sub" id="calMsg">Yüzün aranıyor… Kameraya izin ver ve yüzünü göster.</div>
+  <button class="big hidden" id="calBtn">Düz bakıyorum — Kalibre Et</button>
+  <div class="card" style="margin-top:12px; max-width:340px;">
+    <label class="opt">Hassasiyet <input type="range" id="sens" min="1" max="5" step="0.5" value="2.5"></label>
+    <label class="opt"><input type="checkbox" id="invX"> Yatay ekseni ters çevir</label>
+    <label class="opt"><input type="checkbox" id="invY"> Dikey ekseni ters çevir</label>
+  </div>
+</div>
+
+<!-- VR GİRİŞ -->
+<div id="vrStartOverlay" class="overlay hidden">
+  <h1>🥽 VR Box Modu</h1>
+  <div class="card">
+    <p>1️⃣ Aşağıdaki butona bas (jiroskop izni istenebilir).</p>
+    <p>2️⃣ Telefonu <b>yatay</b> çevir ve VR gözlüğe yerleştir.</p>
+    <p>3️⃣ Menüde bir oyuna <b>bakıp bekleyerek</b> seç.</p>
+    <p>4️⃣ Oyun içinde <b>yere bak</b>: menüye dönüş düğmesi orada. Gözlükten çıkıp ekrana <b>çift dokunursan</b> VR'dan tamamen çıkarsın.</p>
+    <div class="warn">⚠️ İlk kullanımda kısa tut (5 dk). Baş dönmesi olursa gözlüğü çıkar.</div>
+  </div>
+  <button class="big" id="vrStartBtn">VR'ı Başlat</button>
+  <button class="ghost" id="backModeBtn2">← Geri</button>
+</div>
+
+<!-- TELEFON HUB -->
+<div id="hubOverlay" class="overlay transparent hidden">
+  <h1>Oyun Seç</h1>
+  <div class="sub">İmleci bir kartın üzerinde tut (veya dokun)</div>
+  <div id="hubCards">
+    <div class="gameCard dwellable" data-game="sky"><div class="ico">🎈</div><h3>Gökyüzü Avcısı</h3><p>Balon ve kuşları hedefte bekleterek patlat.</p><span class="tag">nişan</span><div class="prog"></div></div>
+    <div class="gameCard dwellable" data-game="plane"><div class="ico">✈️</div><h3>Halka Pilotu</h3><p>Halkalardan geç, yakıt topla, buluta çarpma!</p><span class="tag">takip</span><div class="prog"></div></div>
+    <div class="gameCard dwellable" data-game="fener"><div class="ico">🗼</div><h3>Fener Bekçisi</h3><p>Işığı yavaşça yönlendir, gemileri kayalardan koru.</p><span class="tag">yavaşlık</span><div class="prog"></div></div>
+    <div class="gameCard dwellable" data-game="kaya"><div class="ico">🧗</div><h3>Kaya Tırmanışçısı</h3><p>Uçlardaki tutamaklara bakıp bekle, tırman.</p><span class="tag">izometrik</span><div class="prog"></div></div>
+    <div class="gameCard dwellable" data-game="ritim"><div class="ico">🐦</div><h3>Ritim Kuşu</h3><p>Müzikle gelen notaları başınla yakala.</p><span class="tag">tempo</span><div class="prog"></div></div>
+    <div class="gameCard dwellable" data-game="labirent"><div class="ico">🌀</div><h3>Labirent Topu</h3><p>Başını eğerek topu deliklere düşmeden çıkar.</p><span class="tag">hassasiyet</span><div class="prog"></div></div>
+    <div class="gameCard dwellable" data-game="baykus"><div class="ico">🦉</div><h3>Baykuş Nöbeti</h3><p>Baş sabit bekle, komutla hedefe dön.</p><span class="tag">koordinasyon</span><div class="prog"></div></div>
+  </div>
+  <button class="ghost" id="recalBtn" style="margin-top:14px">🔄 Yeniden kalibre et</button>
+</div>
+
+<!-- MOLA -->
+<div id="pauseOverlay" class="overlay hidden">
+  <h1>⏸ Mola</h1>
+  <div class="sub">Nefes al, omuzlarını gevşet. Hazır olunca devam et.</div>
+  <button class="big dwellable" id="resumeBtn">Devam Et<div class="prog"></div></button>
+  <button class="ghost dwellable" id="quitBtn">Oyunu Bitir<div class="prog"></div></button>
+</div>
+
+<!-- SONUÇ -->
+<div id="endOverlay" class="overlay hidden">
+  <h1 id="endTitle">🏁 Oturum Bitti</h1>
+  <div class="sub" id="endReason"></div>
+  <div class="card">
+    <div class="stat-grid" id="endStats"></div>
+    <p style="font-size:.76rem;color:#567">Hareket dereceleri kaba tahmindir, klinik ölçüm değildir. Düzenlilik önemli: haftada 3–5 seans hedefle.</p>
+  </div>
+  <button class="big dwellable" id="againBtn">🔁 Tekrar Oyna<div class="prog"></div></button>
+  <button class="ghost dwellable" id="menuBtn">🏠 Menüye Dön<div class="prog"></div></button>
+</div>
+
+<script>
+"use strict";
+// ==================== ORTAK DURUM ====================
+const S = {
+  mode: null, scene: 'mode', game: null,   // scene: mode|phoneStart|calib|vrStart|hub|game|pause|end|vr
+  cross: { x: innerWidth/2, y: innerHeight/2 },
+  crossV: 0,                                // imleç hızı (px/sn) — yavaşlık oyunları için
+  raw: { yaw:0, pitch:0 }, cal: { yaw:0, pitch:0.45 },
+  faceSeen:false, calibrated:false,
+  maxDeg: { L:0,R:0,U:0,D:0 },
+  lastGame:null, clouds:[],
+};
+const DWELL_BTN = 1100;
+const $ = id => document.getElementById(id);
+const cv = $('c'), ctx = cv.getContext('2d');
+function resize(){ cv.width=innerWidth*devicePixelRatio; cv.height=innerHeight*devicePixelRatio;
+  cv.style.width=innerWidth+'px'; cv.style.height=innerHeight+'px'; ctx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0); }
+addEventListener('resize', resize); resize();
+for (let i=0;i<7;i++) S.clouds.push({ x:Math.random()*innerWidth, y:Math.random()*innerHeight*.65, s:.5+Math.random(), v:6+Math.random()*10 });
+
+function show(el){ $(el).classList.remove('hidden'); } function hide(el){ $(el).classList.add('hidden'); }
+function toast(msg, ms=1800){ const t=$('toast'); t.textContent=msg; t.style.opacity=1; clearTimeout(t._h); t._h=setTimeout(()=>t.style.opacity=0, ms); }
+const OVERLAYS=['modeOverlay','phoneStartOverlay','calOverlay','vrStartOverlay','hubOverlay','pauseOverlay','endOverlay'];
+function setScene(sc){
+  S.scene = sc;
+  OVERLAYS.forEach(hide); hide('hud');
+  const map={ mode:'modeOverlay', phoneStart:'phoneStartOverlay', calib:'calOverlay', vrStart:'vrStartOverlay', hub:'hubOverlay', pause:'pauseOverlay', end:'endOverlay' };
+  if (map[sc]) show(map[sc]);
+  if (sc==='game') show('hud');
+  $('cursor').style.display = (S.mode==='cam' && ['hub','pause','end'].includes(sc)) ? 'block' : 'none';
+  document.querySelectorAll('.dwellable').forEach(el=>{ el._d=0; const p=el.querySelector('.prog'); if(p)p.style.width='0%'; });
+}
+
+// HUD yardımcıları: her oyun kendi pill'lerini seçer
+function hudSetup(o){ // {score,info,time,fuel}
+  o.score!==false ? show('scorePill') : hide('scorePill');
+  o.info  ? ( $('infoPill').textContent=o.info, show('infoPill') ) : hide('infoPill');
+  o.time  ? show('timePill') : hide('timePill');
+  o.fuel  ? ( $('fuelBar').style.width='100%', show('fuelWrap') ) : hide('fuelWrap');
+}
+function hudScore(v){ $('scorePill').textContent='⭐ '+v; }
+function hudInfo(v){ $('infoPill').textContent=v; }
+function hudTime(sec){ const m=Math.floor(sec/60), s=Math.floor(sec%60); $('timePill').textContent=m+':'+String(s).padStart(2,'0'); }
+
+// ==================== SES ====================
+let AC=null;
+function tone(freq, dur=.18, vol=.25, slide=2.2){ try{ AC=AC||new (window.AudioContext||window.webkitAudioContext)();
+  const o=AC.createOscillator(), g=AC.createGain(); o.connect(g); g.connect(AC.destination);
+  o.frequency.setValueAtTime(freq, AC.currentTime); o.frequency.exponentialRampToValueAtTime(Math.max(40,freq*slide), AC.currentTime+dur*.5);
+  g.gain.setValueAtTime(vol, AC.currentTime); g.gain.exponentialRampToValueAtTime(.001, AC.currentTime+dur);
+  o.start(); o.stop(AC.currentTime+dur+.02);}catch(e){} }
+
+// ==================== YÜZ TAKİBİ (telefon modu) ====================
+let faceMesh=null, camera=null;
+function ema(p,n,a){ return p+(n-p)*a; }
+function onResults(res){
+  if (!res.multiFaceLandmarks || !res.multiFaceLandmarks.length){ S.faceSeen=false; return; }
+  S.faceSeen=true;
+  const lm=res.multiFaceLandmarks[0], L=lm[234], R=lm[454], N=lm[1], F=lm[10], C=lm[152];
+  S.raw.yaw   = ema(S.raw.yaw,   (N.x-L.x)/Math.max(1e-6,(R.x-L.x)), .35);
+  S.raw.pitch = ema(S.raw.pitch, (N.y-F.y)/Math.max(1e-6,(C.y-F.y)), .35);
+  if (!S.calibrated) return;
+  const sens = parseFloat($('sens').value);
+  let dx = S.raw.yaw - S.cal.yaw, dy = S.raw.pitch - S.cal.pitch;
+  if ($('invX').checked) dx=-dx;
+  if ($('invY').checked) dy=-dy;
+  const nx = Math.max(10, Math.min(innerWidth-10,  innerWidth/2  + (-dx)*sens*innerWidth));
+  const ny = Math.max(10, Math.min(innerHeight-10, innerHeight/2 + ( dy)*sens*innerHeight));
+  const nowT = performance.now();
+  if (S._lastCrossT){ const dtm=(nowT-S._lastCrossT)/1000;
+    if (dtm>0) S.crossV = ema(S.crossV, Math.hypot(nx-S.cross.x, ny-S.cross.y)/dtm, .3); }
+  S._lastCrossT = nowT;
+  S.cross.x=nx; S.cross.y=ny;
+  const yd = dx*90, pd = dy*90;
+  if (yd<0) S.maxDeg.R=Math.max(S.maxDeg.R,-yd); else S.maxDeg.L=Math.max(S.maxDeg.L,yd);
+  if (pd<0) S.maxDeg.U=Math.max(S.maxDeg.U,-pd); else S.maxDeg.D=Math.max(S.maxDeg.D,pd);
+}
+async function startCamera(){
+  const video=$('video');
+  faceMesh = new FaceMesh({ locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${f}` });
+  faceMesh.setOptions({ maxNumFaces:1, refineLandmarks:false, minDetectionConfidence:.5, minTrackingConfidence:.5 });
+  faceMesh.onResults(onResults);
+  camera = new Camera(video, { onFrame: async()=>{ await faceMesh.send({image:video}); }, width:480, height:360, facingMode:'user' });
+  await camera.start();
+  const prev=$('camPreview'); prev.srcObject=video.srcObject; prev.style.display='block'; prev.play().catch(()=>{});
+}
+
+// ==================== BAŞ İMLECİ + DWELL BUTONLAR ====================
+function updateCursorUI(dt){
+  if (S.mode!=='cam' || !['hub','pause','end'].includes(S.scene)) return;
+  const cur=$('cursor'); cur.style.left=S.cross.x+'px'; cur.style.top=S.cross.y+'px';
+  document.querySelectorAll('.overlay:not(.hidden) .dwellable').forEach(el=>{
+    const r = el.getBoundingClientRect();
+    const inside = S.cross.x>r.left && S.cross.x<r.right && S.cross.y>r.top && S.cross.y<r.bottom;
+    el._d = inside ? (el._d||0)+dt*1000 : Math.max(0,(el._d||0)-dt*2500);
+    el.classList.toggle('hot', inside);
+    const p = el.querySelector('.prog'); if (p) p.style.width = Math.min(100, 100*el._d/DWELL_BTN)+'%';
+    if (el._d >= DWELL_BTN){ el._d=0; if(p)p.style.width='0%'; tone(700,.12,.2,1.5); el.click(); }
+  });
+}
+
+// ==================== ORTAK ÇİZİMLER ====================
+function drawSkyBg(dt, horizon=1){
+  const w=innerWidth, h=innerHeight;
+  const g=ctx.createLinearGradient(0,0,0,h);
+  g.addColorStop(0,'#4A90D9'); g.addColorStop(.6,'#87CEEB'); g.addColorStop(1,'#d6effa');
+  ctx.fillStyle=g; ctx.fillRect(0,0,w,h);
+  ctx.fillStyle='rgba(255,244,180,.95)'; ctx.beginPath(); ctx.arc(w*.85,h*.13,34,0,7); ctx.fill();
+  ctx.fillStyle='rgba(255,255,255,.85)';
+  for (const c of S.clouds){
+    c.x+=c.v*dt; if (c.x>w+90){ c.x=-90; c.y=Math.random()*h*.65; }
+    ctx.beginPath(); ctx.arc(c.x,c.y,22*c.s,0,7); ctx.arc(c.x+20*c.s,c.y-10*c.s,18*c.s,0,7); ctx.arc(c.x+40*c.s,c.y,20*c.s,0,7); ctx.fill();
+  }
+  if (horizon<1){
+    const hy=h*horizon;
+    const sg=ctx.createLinearGradient(0,hy,0,h);
+    sg.addColorStop(0,'#2e7fb8'); sg.addColorStop(1,'#155a8a');
+    ctx.fillStyle=sg; ctx.fillRect(0,hy,w,h-hy);
+    ctx.strokeStyle='rgba(255,255,255,.25)'; ctx.lineWidth=1;
+    for(let i=1;i<5;i++){ ctx.beginPath(); ctx.moveTo(0,hy+(h-hy)*i/5); ctx.lineTo(w,hy+(h-hy)*i/5); ctx.stroke(); }
+  }
+}
+function drawFx(list, dt){
+  for (let i=list.length-1;i>=0;i--){ const p=list[i];
+    p.x+=p.vx*dt; p.y+=p.vy*dt; p.vy+=300*dt; p.life-=dt;
+    if (p.life<=0){ list.splice(i,1); continue; }
+    ctx.globalAlpha=Math.max(0,p.life/.6); ctx.fillStyle=`hsl(${p.hue} 85% 60%)`;
+    ctx.beginPath(); ctx.arc(p.x,p.y,4,0,7); ctx.fill(); ctx.globalAlpha=1;
+  }
+}
+function drawCrosshair(){
+  const {x,y}=S.cross;
+  ctx.strokeStyle='rgba(255,60,60,.95)'; ctx.lineWidth=3;
+  ctx.beginPath(); ctx.arc(x,y,16,0,7); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(x-26,y); ctx.lineTo(x-8,y); ctx.moveTo(x+8,y); ctx.lineTo(x+26,y);
+  ctx.moveTo(x,y-26); ctx.lineTo(x,y-8); ctx.moveTo(x,y+8); ctx.lineTo(x,y+26); ctx.stroke();
+  ctx.fillStyle='rgba(255,60,60,.95)'; ctx.beginPath(); ctx.arc(x,y,3,0,7); ctx.fill();
+}
+function dwellRing(x,y,r,frac){
+  if (frac<=0) return;
+  ctx.strokeStyle='#fff'; ctx.lineWidth=5; ctx.globalAlpha=.9;
+  ctx.beginPath(); ctx.arc(x,y,r,-Math.PI/2,-Math.PI/2+frac*Math.PI*2); ctx.stroke(); ctx.globalAlpha=1;
+}
+function rotStr(k){
+  if (S.mode==='touch') return '—';
+  return k==='LR' ? Math.round(S.maxDeg.L)+'° / '+Math.round(S.maxDeg.R)+'°'
+                  : Math.round(S.maxDeg.D)+'° / '+Math.round(S.maxDeg.U)+'°';
+}
+function romStats(){ return [['Rotasyon sol/sağ', rotStr('LR')],['Aşağı/yukarı', rotStr('DU')]]; }
+function noFaceBanner(){
+  if (S.mode==='cam' && !S.faceSeen && S.scene==='game'){
+    const w=innerWidth,h=innerHeight;
+    ctx.fillStyle='rgba(0,40,80,.6)'; ctx.fillRect(0,h/2-24,w,48);
+    ctx.fillStyle='#fff'; ctx.font='16px sans-serif'; ctx.textAlign='center';
+    ctx.fillText('Yüz bulunamadı — kameraya bak 📷', w/2, h/2+6);
+  }
+}
+function endScreen(title, reason, stats){
+  $('endTitle').textContent=title;
+  $('endReason').textContent=reason;
+  $('endStats').innerHTML = stats.map(([l,v])=>`<div class="stat"><div class="v">${v}</div><div class="l">${l}</div></div>`).join('');
+  setScene('end');
+}
+
+// ==================== OYUN KAYDI ====================
+const GAMES = {};
+function gameBegin(id){
+  S.game=id; S.lastGame=id; S.maxDeg={L:0,R:0,U:0,D:0};
+  GAMES[id].begin(); setScene('game');
+}
+
+// ==================== OYUN: GÖKYÜZÜ AVCISI ====================
+GAMES.sky = (()=>{
+  const g={ }; const DW=800, LIFE=9000;
+  function begin(){
+    Object.assign(g,{ score:0,hits:0,spawned:0,level:1,timeLeft:180,spread:.28,targets:[],fx:[],lastSpawn:0 });
+    hudSetup({info:'Sv 1', time:true}); hudScore(0);
+    toast('Nişangahı hedefin üstünde tut 🎯');
+  }
+  function spawn(){
+    if (g.targets.length>=2) return;
+    const cx=innerWidth/2, cy=innerHeight/2, maxR=Math.min(innerWidth,innerHeight)*g.spread;
+    const a=Math.random()*Math.PI*2, r=maxR*(.45+Math.random()*.55), m=60;
+    const isBird = g.level>=2 && Math.random()<.35;
+    g.targets.push({ x:Math.max(m,Math.min(innerWidth-m, cx+Math.cos(a)*r*1.25)),
+      y:Math.max(m+50,Math.min(innerHeight-m, cy+Math.sin(a)*r)),
+      r:isBird?34:40, type:isBird?'bird':'balloon', hue:200+Math.random()*160,
+      born:performance.now(), dwell:0, vx:isBird?(Math.random()<.5?-1:1)*(28+g.level*7):0, vy:isBird?0:-6, wob:Math.random()*7 });
+    g.spawned++;
+  }
+  function update(dt, now){
+    g.timeLeft-=dt;
+    if (g.timeLeft<=0){ end(); return; }
+    hudTime(g.timeLeft); hudScore(g.score);
+    for (let i=g.targets.length-1;i>=0;i--){
+      const t=g.targets[i];
+      t.wob+=dt*2; t.x+=t.vx*dt; t.y+=t.vy*dt+Math.sin(t.wob)*.25;
+      if (t.type==='bird' && (t.x<50||t.x>innerWidth-50)) t.vx=-t.vx;
+      const d=Math.hypot(S.cross.x-t.x, S.cross.y-t.y);
+      t.dwell = d<t.r+14 ? t.dwell+dt*1000 : Math.max(0,t.dwell-dt*1600);
+      if (t.dwell>=DW){
+        g.hits++; g.score+= t.type==='bird'?15:10; tone(t.type==='bird'?800:550);
+        for(let p=0;p<14;p++) g.fx.push({x:t.x,y:t.y,vx:(Math.random()-.5)*260,vy:(Math.random()-.7)*260,life:.6,hue:t.hue});
+        g.targets.splice(i,1);
+        if (g.hits%5===0){ g.level++; g.spread=Math.min(.46,g.spread+.035); hudInfo('Sv '+g.level); toast('🎉 Seviye '+g.level+' — daha geniş alan!'); }
+        continue;
+      }
+      if (now-t.born>LIFE) g.targets.splice(i,1);
+    }
+    if (now-g.lastSpawn > (g.targets.length?2600:900)-g.level*120){ spawn(); g.lastSpawn=now; }
+  }
+  function draw(dt){
+    drawSkyBg(dt);
+    for (const t of g.targets){
+      ctx.save(); ctx.translate(t.x,t.y);
+      if (t.type==='balloon'){
+        ctx.strokeStyle='rgba(90,60,30,.5)'; ctx.beginPath(); ctx.moveTo(0,t.r*.95); ctx.quadraticCurveTo(6,t.r*1.5,0,t.r*1.9); ctx.stroke();
+        const bg=ctx.createRadialGradient(-t.r*.3,-t.r*.35,4,0,0,t.r);
+        bg.addColorStop(0,`hsl(${t.hue} 90% 78%)`); bg.addColorStop(1,`hsl(${t.hue} 75% 55%)`);
+        ctx.fillStyle=bg; ctx.beginPath(); ctx.ellipse(0,0,t.r*.85,t.r,0,0,7); ctx.fill();
+        ctx.fillStyle=`hsl(${t.hue} 75% 45%)`; ctx.beginPath(); ctx.moveTo(-6,t.r*.92); ctx.lineTo(6,t.r*.92); ctx.lineTo(0,t.r*1.08); ctx.fill();
+      } else {
+        ctx.font=`${t.r*1.6}px serif`; ctx.textAlign='center'; ctx.textBaseline='middle';
+        ctx.save(); if(t.vx<0)ctx.scale(-1,1); ctx.fillText('🐦',0,0); ctx.restore();
+      }
+      dwellRing(0,0,t.r+12,t.dwell/DW);
+      ctx.restore();
+    }
+    drawFx(g.fx, dt); drawCrosshair();
+  }
+  function end(){
+    endScreen('🏁 Oturum Bitti','',[
+      ['Puan',g.score],['Patlatılan',g.hits],
+      ['İsabet', g.spawned?Math.round(100*g.hits/g.spawned)+'%':'—'],['Seviye',g.level],
+      ...romStats() ]);
+  }
+  return { begin, update, draw, quit:end };
+})();
+
+// ==================== OYUN: HALKA PİLOTU ====================
+GAMES.plane = (()=>{
+  const g={}; const HOR=.42, HALF=.42;
+  const pw=()=>innerWidth*HALF;
+  function begin(){
+    Object.assign(g,{ crashed:false, score:0, rings:0, fuelGot:0, t:0, fuel:100,
+      x:innerWidth/2, y:innerHeight*.62, bank:0, objs:[], fx:[], lastRing:0, lastFuel:0, lastObs:0, speed:9, crashTimer:0, reason:'' });
+    hudSetup({fuel:true}); hudScore(0);
+    toast('✈️ Halkalardan geç, yakıt topla, bulutlardan kaç!');
+  }
+  function spawn(type){
+    const o={ type, z:26, wx:Math.random()*1.5-0.75, wy:Math.random()*1.15-0.55 };
+    if (type==='ring') o.r=.20;
+    if (type==='fuel'){ o.r=.15; o.wy=Math.random()*0.9-0.4; }
+    if (type==='obs'){ o.r=.14; o.spin=Math.random()*7; }
+    g.objs.push(o);
+  }
+  function crash(reason){ g.crashed=true; g.crashTimer=0; g.reason=reason; tone(180,.6,.4,.4); toast(reason); }
+  function update(dt){
+    if (g.crashed){
+      g.crashTimer+=dt; g.y+=dt*380*g.crashTimer; g.bank+=dt*4;
+      for(let i=0;i<2;i++) g.fx.push({x:g.x+(Math.random()-.5)*30, y:g.y-10, vx:(Math.random()-.5)*60, vy:-80+Math.random()*40, life:.8, hue:20+Math.random()*30});
+      if (g.crashTimer>1.6) end();
+      return;
+    }
+    g.t+=dt; g.speed=9+g.t*.12; g.score+=dt*2;
+    g.fuel-=dt*2;
+    $('fuelBar').style.width=Math.max(0,g.fuel)+'%';
+    $('fuelBar').style.background = g.fuel<25 ? 'linear-gradient(90deg,#ff5e62,#d43)' : 'linear-gradient(90deg,#ffd23f,#f0a824)';
+    if (g.fuel<=0){ crash('⛽ Yakıt bitti!'); return; }
+    hudScore(Math.floor(g.score));
+    const tx=S.cross.x, ty=Math.max(innerHeight*.18,Math.min(innerHeight*.9,S.cross.y));
+    const ox=g.x;
+    g.x=ema(g.x,tx,.12); g.y=ema(g.y,ty,.12);
+    g.bank=ema(g.bank,(g.x-ox)*.06,.2);
+    if (g.t-g.lastRing > Math.max(1.6, 2.6-g.t*.02)){ spawn('ring'); g.lastRing=g.t; }
+    if (g.t-g.lastFuel > 9){ spawn('fuel'); g.lastFuel=g.t; }
+    if (g.t>6 && g.t-g.lastObs > Math.max(1.8, 4.5-g.t*.05)){ spawn('obs'); g.lastObs=g.t; }
+    const pwx=(g.x-innerWidth/2)/pw(), pwy=(g.y-innerHeight*HOR)/pw();
+    for (let i=g.objs.length-1;i>=0;i--){
+      const o=g.objs[i]; const zPrev=o.z; o.z-=g.speed*dt;
+      if (o.spin!==undefined) o.spin+=dt*2;
+      if (zPrev>1 && o.z<=1){
+        const d=Math.hypot(o.wx-pwx, o.wy-pwy);
+        if (o.type==='ring'){ if (d<o.r){ g.rings++; g.score+=25; tone(880,.2,.3,1.6); burst(g.x,g.y); toast('✔ Halka! +25',700); } }
+        else if (o.type==='fuel'){ if (d<o.r+.08){ g.fuelGot++; g.fuel=Math.min(100,g.fuel+32); tone(520,.25,.3,1.3); toast('⛽ +Yakıt',700); } }
+        else if (o.type==='obs'){ if (d<o.r+.07){ crash('🌩 Engele çarptın!'); return; } }
+      }
+      if (o.z<=0.35) g.objs.splice(i,1);
+    }
+  }
+  function burst(x,y){ for(let p=0;p<15;p++) g.fx.push({x,y,vx:(Math.random()-.5)*300,vy:(Math.random()-.8)*300,life:.5,hue:45}); }
+  function project(o){ const s=1/o.z; return { x:innerWidth/2+o.wx*pw()*s, y:innerHeight*HOR+o.wy*pw()*s, s }; }
+  function draw(dt){
+    drawSkyBg(dt,.62);
+    const sorted=[...g.objs].sort((a,b)=>b.z-a.z);
+    for (const o of sorted){
+      const p=project(o), R=Math.max(4, o.r*pw()*p.s);
+      ctx.save(); ctx.translate(p.x,p.y);
+      if (o.type==='ring'){
+        ctx.lineWidth=Math.max(3,R*.22);
+        ctx.strokeStyle = o.z<4 ? '#ffd23f' : 'rgba(255,210,63,.75)';
+        ctx.shadowColor='#ffd23f'; ctx.shadowBlur=o.z<4?18:0;
+        ctx.beginPath(); ctx.ellipse(0,0,R,R*1.06,0,0,7); ctx.stroke(); ctx.shadowBlur=0;
+      } else if (o.type==='fuel'){
+        const s2=R/22; ctx.scale(s2,s2);
+        ctx.fillStyle='#e63946'; ctx.fillRect(-14,-18,28,36);
+        ctx.strokeStyle='rgba(0,0,0,.25)'; ctx.strokeRect(-14,-18,28,36);
+        ctx.font='20px sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText('⛽',0,2);
+      } else {
+        ctx.rotate(Math.sin(o.spin)*.15);
+        const s2=R/26; ctx.scale(s2,s2);
+        ctx.fillStyle='#5a6472';
+        ctx.beginPath(); ctx.arc(-16,4,16,0,7); ctx.arc(2,-8,20,0,7); ctx.arc(20,6,15,0,7); ctx.fill();
+        ctx.fillStyle='#ffd23f'; ctx.font='bold 22px sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText('⚡',2,16);
+      }
+      ctx.restore();
+    }
+    drawFx(g.fx, dt); drawPlaneSprite(g.x,g.y,g.bank);
+  }
+  function drawPlaneSprite(x,y,bank){
+    ctx.save(); ctx.translate(x,y); ctx.rotate(bank);
+    ctx.fillStyle='rgba(0,0,0,.12)'; ctx.beginPath(); ctx.ellipse(0,26,44,7,0,0,7); ctx.fill();
+    ctx.fillStyle='#e63946';
+    ctx.beginPath(); ctx.moveTo(-78,4); ctx.lineTo(-12,-4); ctx.lineTo(12,-4); ctx.lineTo(78,4); ctx.lineTo(70,10); ctx.lineTo(-70,10); ctx.closePath(); ctx.fill();
+    ctx.fillStyle='#d62839'; ctx.beginPath(); ctx.moveTo(-3,-6); ctx.lineTo(0,-30); ctx.lineTo(6,-6); ctx.closePath(); ctx.fill();
+    ctx.fillStyle='#e63946'; ctx.beginPath(); ctx.moveTo(-26,-8); ctx.lineTo(26,-8); ctx.lineTo(20,-3); ctx.lineTo(-20,-3); ctx.closePath(); ctx.fill();
+    const gg=ctx.createRadialGradient(0,-4,2,0,0,16);
+    gg.addColorStop(0,'#fff'); gg.addColorStop(1,'#c8ccd4');
+    ctx.fillStyle=gg; ctx.beginPath(); ctx.ellipse(0,0,11,15,0,0,7); ctx.fill();
+    ctx.strokeStyle='rgba(0,0,0,.2)'; ctx.stroke();
+    ctx.restore();
+  }
+  function end(){
+    endScreen('💥 Uçak Düştü', g.reason, [
+      ['Puan',Math.floor(g.score)],['Geçilen halka',g.rings],
+      ['Havada kalma', Math.floor(g.t)+' sn'],['Toplanan yakıt',g.fuelGot],
+      ...romStats() ]);
+  }
+  return { begin, update, draw, quit(){ g.crashed=false; end(); } };
+})();
+
+// ==================== OYUN: FENER BEKÇİSİ ====================
+GAMES.fener = (()=>{
+  const g={}; const NEED=3.5, CALM=600; // gemi başına 3.5 sn ışık; sakin hız limiti px/sn
+  function begin(){
+    Object.assign(g,{ timeLeft:180, saved:0, lost:0, ships:[], lastShip:0, t:0, calmT:0, totT:0, stars:[] });
+    for(let i=0;i<60;i++) g.stars.push({x:Math.random()*innerWidth,y:Math.random()*innerHeight*.3,r:Math.random()*1.5+.5});
+    hudSetup({info:'🚢 0 kurtarıldı', time:true}); hudScore(0);
+    toast('Işığı YAVAŞÇA gemiye tut, kayalardan uzaklaştır 🗼');
+  }
+  function spawnShip(){
+    if (g.ships.length>=2) return;
+    const left = Math.random()<.5;
+    const y = innerHeight*(.42+Math.random()*.25);
+    g.ships.push({ x:left?-40:innerWidth+40, y, vx:(left?1:-1)*(26+Math.random()*12), lit:0, saved:false, flash:0 });
+  }
+  function update(dt){
+    g.timeLeft-=dt; g.t+=dt; g.totT+=dt;
+    if (g.timeLeft<=0){ end(); return; }
+    hudTime(g.timeLeft);
+    const calm = S.mode!=='cam' || S.crossV < CALM;
+    if (calm) g.calmT+=dt;
+    if (g.t-g.lastShip > (g.ships.length?8:4)){ spawnShip(); g.lastShip=g.t; }
+    const lx=innerWidth/2, ly=innerHeight-30;
+    const beamA=Math.atan2(S.cross.y-ly, S.cross.x-lx);
+    for (let i=g.ships.length-1;i>=0;i--){
+      const s=g.ships[i];
+      s.x+=s.vx*dt; s.flash=Math.max(0,s.flash-dt);
+      const shipA=Math.atan2(s.y-ly, s.x-lx);
+      let dA=Math.abs(beamA-shipA); if (dA>Math.PI) dA=Math.PI*2-dA;
+      const onShip = dA < .14;
+      if (onShip && calm && !s.saved) s.lit+=dt;
+      if (s.lit>=NEED && !s.saved){ s.saved=true; s.vx=-s.vx*1.4; g.saved++; hudScore(g.saved*20); hudInfo('🚢 '+g.saved+' kurtarıldı'); tone(660,.3,.3,1.5); toast('⚓ Gemi güvende! +20',900); }
+      // kayalık bölgesi: merkez ±70
+      if (!s.saved && Math.abs(s.x-innerWidth/2)<70){ g.lost++; tone(140,.5,.35,.5); toast('💥 Gemi kayalara çarptı!',1200); g.ships.splice(i,1); continue; }
+      if (s.x<-60||s.x>innerWidth+60) g.ships.splice(i,1);
+    }
+  }
+  function draw(dt){
+    const w=innerWidth,h=innerHeight;
+    // gece
+    const bg=ctx.createLinearGradient(0,0,0,h);
+    bg.addColorStop(0,'#0a1230'); bg.addColorStop(.4,'#16264d'); bg.addColorStop(1,'#0d1b33');
+    ctx.fillStyle=bg; ctx.fillRect(0,0,w,h);
+    ctx.fillStyle='rgba(255,255,255,.8)';
+    for(const st of g.stars){ ctx.globalAlpha=.4+.6*Math.abs(Math.sin(g.t+st.x)); ctx.beginPath(); ctx.arc(st.x,st.y,st.r,0,7); ctx.fill(); }
+    ctx.globalAlpha=1;
+    ctx.fillStyle='rgba(240,240,210,.9)'; ctx.beginPath(); ctx.arc(w*.82,h*.12,26,0,7); ctx.fill();
+    // deniz
+    const sea=ctx.createLinearGradient(0,h*.38,0,h);
+    sea.addColorStop(0,'#122c4d'); sea.addColorStop(1,'#081830');
+    ctx.fillStyle=sea; ctx.fillRect(0,h*.38,w,h);
+    const lx=w/2, ly=h-30;
+    // ışık hüzmesi
+    const calm = S.mode!=='cam' || S.crossV < CALM;
+    const beamA=Math.atan2(S.cross.y-ly,S.cross.x-lx);
+    const len=Math.hypot(w,h);
+    ctx.save();
+    ctx.globalAlpha = calm ? .30 : .10+.08*Math.sin(g.t*40);
+    const grad=ctx.createRadialGradient(lx,ly,20,lx,ly,len);
+    grad.addColorStop(0,'#fff7c0'); grad.addColorStop(1,'rgba(255,247,192,0)');
+    ctx.fillStyle=grad;
+    ctx.beginPath(); ctx.moveTo(lx,ly);
+    ctx.arc(lx,ly,len,beamA-.12,beamA+.12); ctx.closePath(); ctx.fill();
+    ctx.restore();
+    if (!calm){ ctx.fillStyle='rgba(255,120,120,.9)'; ctx.font='bold 15px sans-serif'; ctx.textAlign='center'; ctx.fillText('YAVAŞ… ışık titriyor', w/2, h*.3); }
+    // kayalıklar
+    ctx.fillStyle='#1c2733';
+    ctx.beginPath(); ctx.moveTo(w/2-70,h); ctx.lineTo(w/2-30,h*.52); ctx.lineTo(w/2,h*.58); ctx.lineTo(w/2+35,h*.5); ctx.lineTo(w/2+70,h); ctx.closePath(); ctx.fill();
+    // gemiler
+    for (const s of g.ships){
+      ctx.save(); ctx.translate(s.x,s.y);
+      ctx.font='26px serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
+      ctx.save(); if(s.vx<0)ctx.scale(-1,1); ctx.fillText('🚢',0,0); ctx.restore();
+      if (!s.saved && s.lit>0) dwellRing(0,0,26,s.lit/NEED);
+      if (s.saved){ ctx.fillStyle='#7CFC90'; ctx.font='13px sans-serif'; ctx.fillText('⚓ güvende',0,-28); }
+      ctx.restore();
+    }
+    // fener
+    ctx.save(); ctx.translate(lx,ly);
+    ctx.fillStyle='#d9d9e0'; ctx.fillRect(-12,-46,24,46);
+    ctx.fillStyle='#e63946'; ctx.fillRect(-12,-46,24,10); ctx.fillRect(-12,-24,24,10);
+    ctx.fillStyle='#fff7c0'; ctx.beginPath(); ctx.arc(0,-52,8,0,7); ctx.fill();
+    ctx.restore();
+    drawCrosshair();
+  }
+  function end(){
+    const calmPct = g.totT? Math.round(100*g.calmT/g.totT) : 100;
+    endScreen('🗼 Nöbet Bitti','',[
+      ['Kurtarılan gemi',g.saved],['Kaybedilen',g.lost],
+      ['Sakinlik',calmPct+'%'],['Puan',g.saved*20],
+      ...romStats() ]);
+  }
+  return { begin, update, draw, quit:end };
+})();
+
+// ==================== OYUN: KAYA TIRMANIŞÇISI ====================
+GAMES.kaya = (()=>{
+  const g={}; const HOLD=2500, HOLDLIFE=14000;
+  function begin(){
+    Object.assign(g,{ timeLeft:180, height:0, grabs:0, level:1, spread:.30, hold:null, t:0, flash:0 });
+    hudSetup({info:'⛰ 0 m', time:true}); hudScore(0);
+    newHold(); toast('Tutamağa bak ve 2,5 sn bekle 🧗');
+  }
+  function newHold(){
+    const cx=innerWidth/2, cy=innerHeight/2;
+    const maxR=Math.min(innerWidth,innerHeight)*g.spread;
+    // sıradaki tutamak zıt tarafta olsun ki boyun iki yöne de çalışsın
+    const side = g.grabs%4; // 0 sağ üst,1 sol üst,2 sağ,3 sol
+    const baseA = side===0? -Math.PI*.25 : side===1? -Math.PI*.75 : side===2? 0 : Math.PI;
+    const a = baseA + (Math.random()-.5)*.6;
+    const m=64;
+    g.hold={ x:Math.max(m,Math.min(innerWidth-m, cx+Math.cos(a)*maxR*1.3)),
+             y:Math.max(m+50,Math.min(innerHeight-m, cy+Math.sin(a)*maxR)),
+             dwell:0, born:performance.now() };
+  }
+  function update(dt, now){
+    g.timeLeft-=dt; g.t+=dt; g.flash=Math.max(0,g.flash-dt);
+    if (g.timeLeft<=0){ end(); return; }
+    hudTime(g.timeLeft);
+    const h0=g.hold;
+    if (!h0) return;
+    const d=Math.hypot(S.cross.x-h0.x, S.cross.y-h0.y);
+    h0.dwell = d<46 ? h0.dwell+dt*1000 : Math.max(0,h0.dwell-dt*1200);
+    if (h0.dwell>=HOLD){
+      g.grabs++; g.height+=2; g.flash=.4; tone(500+g.grabs*10,.2,.3,1.4);
+      hudInfo('⛰ '+g.height+' m'); hudScore(g.height*5);
+      if (g.grabs%4===0){ g.level++; g.spread=Math.min(.48,g.spread+.04); toast('🎉 Seviye '+g.level+' — tutamaklar daha uzakta!'); }
+      newHold();
+    } else if (now-h0.born>HOLDLIFE){ newHold(); toast('Tutamak ufalandı, yenisi çıktı',900); }
+  }
+  function draw(dt){
+    const w=innerWidth,h=innerHeight;
+    const bg=ctx.createLinearGradient(0,0,0,h);
+    bg.addColorStop(0,'#8fb8d8'); bg.addColorStop(.5,'#9a8f80'); bg.addColorStop(1,'#6e6152');
+    ctx.fillStyle=bg; ctx.fillRect(0,0,w,h);
+    // kaya dokusu
+    ctx.fillStyle='rgba(0,0,0,.07)';
+    for(let i=0;i<26;i++){ const sx=(i*137)%w, sy=(i*211)%h; ctx.beginPath(); ctx.arc(sx,sy,14+(i%5)*7,0,7); ctx.fill(); }
+    // yükseklik çizgileri
+    ctx.strokeStyle='rgba(255,255,255,.25)'; ctx.setLineDash([6,10]);
+    for(let i=1;i<4;i++){ ctx.beginPath(); ctx.moveTo(0,h*i/4); ctx.lineTo(w,h*i/4); ctx.stroke(); }
+    ctx.setLineDash([]);
+    // tutamak
+    if (g.hold){
+      const t=g.hold;
+      ctx.save(); ctx.translate(t.x,t.y);
+      ctx.fillStyle='#4b4034'; ctx.beginPath();
+      ctx.moveTo(-22,8); ctx.quadraticCurveTo(-18,-16,0,-14); ctx.quadraticCurveTo(20,-14,22,6); ctx.quadraticCurveTo(0,18,-22,8); ctx.fill();
+      ctx.fillStyle='#2e2620'; ctx.beginPath(); ctx.ellipse(0,-2,10,5,0,0,7); ctx.fill();
+      dwellRing(0,0,34,t.dwell/HOLD);
+      ctx.restore();
+    }
+    // tırmanışçı (merkez)
+    ctx.save(); ctx.translate(w/2,h/2+ (g.flash>0? -14*Math.sin(g.flash*8):0));
+    ctx.font='44px serif'; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText('🧗',0,0);
+    ctx.restore();
+    drawCrosshair();
+  }
+  function end(){
+    endScreen('⛰ Tırmanış Bitti','',[
+      ['Yükseklik',g.height+' m'],['Tutamak',g.grabs],
+      ['Seviye',g.level],['Puan',g.height*5],
+      ...romStats() ]);
+  }
+  return { begin, update, draw, quit:end };
+})();
+
+// ==================== OYUN: RİTİM KUŞU ====================
+GAMES.ritim = (()=>{
+  const g={}; const LANES=[{a:Math.PI,name:'sol'},{a:0,name:'sağ'},{a:-Math.PI/2,name:'üst'}];
+  const HITR=95, CATCH=78;
+  function begin(){
+    Object.assign(g,{ timeLeft:180, bpm:80, beatAcc:0, beatN:0, notes:[], hits:0, miss:0, combo:0, bestCombo:0, t:0 });
+    hudSetup({info:'🎵 80 BPM', time:true}); hudScore(0);
+    toast('Notaları vuruş anında başınla yakala 🐦');
+  }
+  function update(dt){
+    g.timeLeft-=dt; g.t+=dt;
+    if (g.timeLeft<=0){ end(); return; }
+    hudTime(g.timeLeft);
+    const beatLen=60/g.bpm;
+    g.beatAcc+=dt;
+    while (g.beatAcc>=beatLen){
+      g.beatAcc-=beatLen; g.beatN++;
+      tone(220,.05,.08,1); // metronom
+      if (g.beatN%2===0){ // 2 vuruşta bir nota
+        const lane=LANES[Math.floor(Math.random()*3)];
+        const travel=beatLen*4; // 4 vuruşta merkeze
+        g.notes.push({ lane, t:0, travel, hue:180+Math.random()*160, done:false });
+      }
+    }
+    const cx=innerWidth/2, cy=innerHeight/2+40;
+    for (let i=g.notes.length-1;i>=0;i--){
+      const n=g.notes[i]; n.t+=dt;
+      const frac=n.t/n.travel;
+      const dist=(1-frac)*(Math.min(innerWidth,innerHeight)*.62);
+      n.x=cx+Math.cos(n.lane.a)*dist; n.y=cy+Math.sin(n.lane.a)*dist;
+      const inWindow = Math.abs(dist-HITR)<50;
+      if (inWindow && !n.done && Math.hypot(S.cross.x-n.x,S.cross.y-n.y)<CATCH){
+        n.done=true; g.hits++; g.combo++; g.bestCombo=Math.max(g.bestCombo,g.combo);
+        hudScore(g.hits*10+g.bestCombo*2);
+        const scale=[523,587,659,784,880];
+        tone(scale[g.combo%5],.18,.3,1.2);
+        if (g.hits%10===0 && g.bpm<125){ g.bpm+=8; hudInfo('🎵 '+g.bpm+' BPM'); toast('⏫ Tempo arttı: '+g.bpm+' BPM'); }
+        g.notes.splice(i,1); continue;
+      }
+      if (frac>=1){ if(!n.done){ g.miss++; g.combo=0; tone(150,.15,.15,.7);} g.notes.splice(i,1); }
+    }
+  }
+  function draw(dt){
+    const w=innerWidth,h=innerHeight;
+    const bg=ctx.createLinearGradient(0,0,0,h);
+    bg.addColorStop(0,'#2b1d4e'); bg.addColorStop(1,'#5c3a78');
+    ctx.fillStyle=bg; ctx.fillRect(0,0,w,h);
+    const cx=w/2, cy=h/2+40;
+    // vuruş halkası (nabız)
+    const beatLen=60/g.bpm, pulse=1+.06*Math.max(0,1-(g.beatAcc/beatLen)*4);
+    ctx.strokeStyle='rgba(255,255,255,.5)'; ctx.lineWidth=3;
+    ctx.beginPath(); ctx.arc(cx,cy,HITR*pulse,0,7); ctx.stroke();
+    // lane çizgileri
+    ctx.strokeStyle='rgba(255,255,255,.15)'; ctx.lineWidth=2;
+    for (const l of LANES){ ctx.beginPath(); ctx.moveTo(cx+Math.cos(l.a)*HITR,cy+Math.sin(l.a)*HITR);
+      ctx.lineTo(cx+Math.cos(l.a)*w,cy+Math.sin(l.a)*w); ctx.stroke(); }
+    // notalar
+    for (const n of g.notes){
+      ctx.save(); ctx.translate(n.x,n.y);
+      ctx.fillStyle=`hsl(${n.hue} 80% 65%)`;
+      ctx.beginPath(); ctx.arc(0,0,20,0,7); ctx.fill();
+      ctx.fillStyle='#fff'; ctx.font='16px sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText('♪',0,1);
+      ctx.restore();
+    }
+    // kuş
+    ctx.font='42px serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillText('🐦',cx,cy);
+    // combo
+    if (g.combo>2){ ctx.fillStyle='#ffd23f'; ctx.font='bold 20px sans-serif'; ctx.fillText(g.combo+'x combo!',cx,cy-130); }
+    drawCrosshair();
+  }
+  function end(){
+    const total=g.hits+g.miss;
+    endScreen('🎶 Şarkı Bitti','',[
+      ['İsabet', total?Math.round(100*g.hits/total)+'%':'—'],['Yakalanan',g.hits],
+      ['En uzun combo',g.bestCombo],['Ulaşılan tempo',g.bpm+' BPM'],
+      ...romStats() ]);
+  }
+  return { begin, update, draw, quit:end };
+})();
+
+// ==================== OYUN: LABİRENT TOPU ====================
+GAMES.labirent = (()=>{
+  const g={};
+  const MAZES=[
+    ['#########','#S....#.#','#.###.#.#','#.#...#.#','#.#.###.#','#.#..o..#','#.####.##','#......E#','#########'],
+    ['#########','#S..#...#','##..#.#.#','#..o..#.#','#.####..#','#.#..o#.#','#.#.###.#','#...#..E#','#########'],
+    ['#########','#S.#....#','#..#.##.#','#.o#..#.#','#..##.#.#','##.#o.#.#','#..#.##.#','#....#.E#','#########'],
+  ];
+  function begin(){
+    Object.assign(g,{ timeLeft:180, mazeIdx:0, falls:0, done:0, t:0 });
+    loadMaze(0);
+    hudSetup({info:'🌀 Labirent 1', time:true}); hudScore(0);
+    toast('Başını eğ: top o yöne yuvarlanır. Deliklere dikkat!');
+  }
+  function loadMaze(i){
+    g.maze=MAZES[i%MAZES.length]; g.rows=g.maze.length; g.cols=g.maze[0].length;
+    g.cell=Math.min(innerWidth/(g.cols+0.5), (innerHeight-100)/(g.rows+0.5));
+    g.ox=(innerWidth-g.cols*g.cell)/2; g.oy=(innerHeight-g.rows*g.cell)/2+30;
+    for(let r=0;r<g.rows;r++) for(let c=0;c<g.cols;c++){
+      if (g.maze[r][c]==='S'){ g.sx=c+.5; g.sy=r+.5; }
+      if (g.maze[r][c]==='E'){ g.ex=c+.5; g.ey=r+.5; }
+    }
+    g.bx=g.sx; g.by=g.sy; g.vx=0; g.vy=0;
+  }
+  function solid(c,r){ return c<0||r<0||c>=g.cols||r>=g.rows||g.maze[r][c]==='#'; }
+  function update(dt){
+    g.timeLeft-=dt; g.t+=dt;
+    if (g.timeLeft<=0){ end(); return; }
+    hudTime(g.timeLeft);
+    // eğim = imlecin merkezden sapması
+    const ax=(S.cross.x-innerWidth/2)/(innerWidth/2)*20;
+    const ay=(S.cross.y-innerHeight/2)/(innerHeight/2)*20;
+    g.vx=(g.vx+ax*dt)*.985; g.vy=(g.vy+ay*dt)*.985;
+    const R=.3;
+    // eksen eksen çarpışma
+    let nx=g.bx+g.vx*dt;
+    if (!hitWall(nx,g.by,R)) g.bx=nx; else g.vx*=-.25;
+    let ny=g.by+g.vy*dt;
+    if (!hitWall(g.bx,ny,R)) g.by=ny; else g.vy*=-.25;
+    // delikler
+    for(let r=0;r<g.rows;r++) for(let c=0;c<g.cols;c++) if (g.maze[r][c]==='o'){
+      if (Math.hypot(g.bx-(c+.5),g.by-(r+.5))<.42){
+        g.falls++; tone(120,.4,.3,.5); toast('🕳 Düştün! Başa dön',900);
+        g.bx=g.sx; g.by=g.sy; g.vx=0; g.vy=0;
+      }
+    }
+    // çıkış
+    if (Math.hypot(g.bx-g.ex,g.by-g.ey)<.5){
+      g.done++; g.mazeIdx++; tone(700,.3,.3,1.8);
+      hudScore(g.done*100); hudInfo('🌀 Labirent '+(g.mazeIdx+1));
+      toast('🎉 Labirent bitti! +100'); loadMaze(g.mazeIdx);
+    }
+  }
+  function hitWall(x,y,R){
+    const pts=[[x-R,y],[x+R,y],[x,y-R],[x,y+R]];
+    return pts.some(([px,py])=>solid(Math.floor(px),Math.floor(py)));
+  }
+  function update2(){}
+  function draw(dt){
+    const w=innerWidth,h=innerHeight;
+    ctx.fillStyle='#2e4a3d'; ctx.fillRect(0,0,w,h);
+    const cs=g.cell;
+    // zemin
+    ctx.fillStyle='#e8dcc8'; ctx.fillRect(g.ox,g.oy,g.cols*cs,g.rows*cs);
+    for(let r=0;r<g.rows;r++) for(let c=0;c<g.cols;c++){
+      const x=g.ox+c*cs, y=g.oy+r*cs, ch=g.maze[r][c];
+      if (ch==='#'){ ctx.fillStyle='#5a4632'; ctx.fillRect(x,y,cs+.5,cs+.5);
+        ctx.fillStyle='rgba(255,255,255,.08)'; ctx.fillRect(x,y,cs,3); }
+      if (ch==='o'){ ctx.fillStyle='#1a1a1a'; ctx.beginPath(); ctx.arc(x+cs/2,y+cs/2,cs*.36,0,7); ctx.fill();
+        ctx.fillStyle='rgba(255,255,255,.12)'; ctx.beginPath(); ctx.arc(x+cs/2,y+cs/2-2,cs*.3,0,7); ctx.fill(); }
+      if (ch==='E'){ ctx.fillStyle='#7CFC90'; ctx.fillRect(x+3,y+3,cs-6,cs-6);
+        ctx.fillStyle='#1a4a2a'; ctx.font=`${cs*.5}px sans-serif`; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText('★',x+cs/2,y+cs/2); }
+    }
+    // top
+    const bx=g.ox+g.bx*cs, by=g.oy+g.by*cs;
+    const grad=ctx.createRadialGradient(bx-3,by-4,2,bx,by,cs*.3);
+    grad.addColorStop(0,'#9fd4ff'); grad.addColorStop(1,'#1d6fb8');
+    ctx.fillStyle=grad; ctx.beginPath(); ctx.arc(bx,by,cs*.3,0,7); ctx.fill();
+    // eğim göstergesi
+    ctx.strokeStyle='rgba(255,255,255,.5)'; ctx.lineWidth=2;
+    ctx.beginPath(); ctx.moveTo(w/2,h/2); ctx.lineTo(S.cross.x,S.cross.y); ctx.stroke();
+    drawCrosshair();
+  }
+  function end(){
+    endScreen('🌀 Labirent Bitti','',[
+      ['Biten labirent',g.done],['Deliğe düşme',g.falls],
+      ['Puan',g.done*100],['Süre',Math.floor(180-g.timeLeft)+' sn'],
+      ...romStats() ]);
+  }
+  return { begin, update, draw, quit:end };
+})();
+
+// ==================== OYUN: BAYKUŞ NÖBETİ ====================
+GAMES.baykus = (()=>{
+  const g={}; const STILL=2500, FINDMAX=3.5, CONFIRM=300;
+  function begin(){
+    Object.assign(g,{ timeLeft:180, round:0, phase:'still', pT:0, score:0, hits:0, misses:0, sumRT:0, target:null, t:0 });
+    newRound();
+    hudSetup({info:'🦉 SABİT DUR', time:true}); hudScore(0);
+    toast('Başını merkezde SABİT tut, gözlerinle fareyi ara 🦉');
+  }
+  function newRound(){
+    g.round++; g.phase='still'; g.pT=0;
+    const cx=innerWidth/2, cy=innerHeight/2;
+    const a=Math.random()*Math.PI*2, r=Math.min(innerWidth,innerHeight)*(.3+Math.random()*.16);
+    const m=60;
+    g.target={ x:Math.max(m,Math.min(innerWidth-m,cx+Math.cos(a)*r*1.3)),
+               y:Math.max(m+50,Math.min(innerHeight-m,cy+Math.sin(a)*r)), dwell:0 };
+    hudInfo('🦉 SABİT DUR');
+  }
+  function update(dt){
+    g.timeLeft-=dt; g.t+=dt;
+    if (g.timeLeft<=0){ end(); return; }
+    hudTime(g.timeLeft);
+    const cx=innerWidth/2, cy=innerHeight/2;
+    const dC=Math.hypot(S.cross.x-cx,S.cross.y-cy);
+    if (g.phase==='still'){
+      if (dC<80) g.pT+=dt*1000; else { g.pT=Math.max(0,g.pT-dt*2000); }
+      if (g.pT>=STILL){ g.phase='find'; g.pT=0; tone(880,.15,.3,1.3); hudInfo('👀 ŞİMDİ BAK!'); }
+    } else if (g.phase==='find'){
+      g.pT+=dt;
+      const d=Math.hypot(S.cross.x-g.target.x,S.cross.y-g.target.y);
+      if (d<60){
+        g.target.dwell+=dt*1000;
+        if (g.target.dwell>=CONFIRM){
+          const rt=g.pT;
+          g.hits++; g.sumRT+=rt;
+          const pts=Math.max(5,Math.round(25-rt*6));
+          g.score+=pts; hudScore(g.score);
+          tone(660,.2,.3,1.5); toast('🐭 Yakaladın! +'+pts+' ('+rt.toFixed(1)+' sn)',900);
+          newRound(); return;
+        }
+      } else g.target.dwell=0;
+      if (g.pT>FINDMAX){ g.misses++; tone(160,.3,.2,.6); toast('Fare kaçtı! 🐭💨',900); newRound(); }
+    }
+  }
+  function draw(dt){
+    const w=innerWidth,h=innerHeight;
+    const bg=ctx.createLinearGradient(0,0,0,h);
+    bg.addColorStop(0,'#1b2a20'); bg.addColorStop(1,'#31241a');
+    ctx.fillStyle=bg; ctx.fillRect(0,0,w,h);
+    // ay
+    ctx.fillStyle='rgba(240,240,210,.85)'; ctx.beginPath(); ctx.arc(w*.85,h*.1,24,0,7); ctx.fill();
+    const cx=w/2, cy=h/2;
+    // merkez bölge
+    ctx.strokeStyle = g.phase==='still' ? 'rgba(124,252,144,.8)' : 'rgba(255,255,255,.2)';
+    ctx.lineWidth=3; ctx.setLineDash([8,8]);
+    ctx.beginPath(); ctx.arc(cx,cy,80,0,7); ctx.stroke(); ctx.setLineDash([]);
+    if (g.phase==='still') dwellRing(cx,cy,92,g.pT/STILL);
+    // baykuş
+    ctx.font='52px serif'; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText('🦉',cx,cy);
+    // hedef fare (her iki fazda görünür — göz araması için)
+    if (g.target){
+      const tw = g.phase==='find' ? 1 : .55+.2*Math.sin(g.t*3);
+      ctx.globalAlpha=tw;
+      ctx.font='34px serif'; ctx.fillText('🐭',g.target.x,g.target.y);
+      ctx.globalAlpha=1;
+      if (g.phase==='find'){
+        dwellRing(g.target.x,g.target.y,40,g.target.dwell/CONFIRM);
+        // süre çubuğu
+        ctx.fillStyle='rgba(255,255,255,.25)'; ctx.fillRect(w/2-80,h-60,160,10);
+        ctx.fillStyle='#ffd23f'; ctx.fillRect(w/2-80,h-60,160*Math.max(0,1-g.pT/FINDMAX),10);
+      }
+    }
+    // faz yazısı
+    ctx.fillStyle='rgba(255,255,255,.85)'; ctx.font='bold 17px sans-serif';
+    ctx.fillText(g.phase==='still' ? 'Başını merkezde sabit tut, fareyi GÖZLERİNLE bul' : 'ŞİMDİ başını hızla fareye çevir!', cx, 70);
+    drawCrosshair();
+  }
+  function end(){
+    endScreen('🦉 Nöbet Bitti','',[
+      ['Yakalanan fare',g.hits],['Kaçan',g.misses],
+      ['Ort. tepki', g.hits?(g.sumRT/g.hits).toFixed(1)+' sn':'—'],['Puan',g.score],
+      ...romStats() ]);
+  }
+  return { begin, update, draw, quit:end };
+})();
+
+// ==================== VR MODÜLÜ ====================
+const VR = (()=>{
+  let renderer, scene, rig, cam, stereo, reticle, retC, retTex;
+  let inited=false, state='menu', world=null, gazeTargets=[], hud=null, hudC=null, hudTex=null, hudT=0;
+  let particles=[], lastVRGame=null, vrRom={L:0,R:0,U:0,D:0};
+  const tmpV=new THREE.Vector3(), tmpV2=new THREE.Vector3(), tmpV3=new THREE.Vector3();
+
+  // --- sensör -> quaternion ---
+  let dOr=null, mouseYaw=0, mousePitch=0, hasSensor=false;
+  addEventListener('deviceorientation', e=>{ if (e.alpha!==null){ dOr=e; hasSensor=true; } });
+  const zee=new THREE.Vector3(0,0,1), eul=new THREE.Euler(), q0=new THREE.Quaternion(),
+        q1=new THREE.Quaternion(-Math.sqrt(.5),0,0,Math.sqrt(.5));
+  function scrAngle(){ return (screen.orientation && screen.orientation.angle!==undefined) ? screen.orientation.angle : (window.orientation||0); }
+  function updateCamQuat(){
+    if (dOr){
+      const a=THREE.MathUtils.degToRad(dOr.alpha||0), b=THREE.MathUtils.degToRad(dOr.beta||0), g=THREE.MathUtils.degToRad(dOr.gamma||0);
+      eul.set(b,a,-g,'YXZ'); cam.quaternion.setFromEuler(eul);
+      cam.quaternion.multiply(q1);
+      cam.quaternion.multiply(q0.setFromAxisAngle(zee,-THREE.MathUtils.degToRad(scrAngle())));
+    } else {
+      cam.quaternion.setFromEuler(new THREE.Euler(mousePitch, mouseYaw, 0, 'YXZ')); // masaüstü test: fare
+    }
+  }
+  // masaüstü fare fallback
+  let dragging=false,lx=0,ly=0;
+  $('v').addEventListener('mousedown',e=>{dragging=true;lx=e.clientX;ly=e.clientY;});
+  addEventListener('mouseup',()=>dragging=false);
+  addEventListener('mousemove',e=>{ if(!dragging||hasSensor)return;
+    mouseYaw-=(e.clientX-lx)*.004; mousePitch=Math.max(-1.4,Math.min(1.4,mousePitch-(e.clientY-ly)*.004)); lx=e.clientX; ly=e.clientY; });
+
+  function recenter(){
+    cam.getWorldDirection(tmpV);
+    const yaw=Math.atan2(tmpV.x,-tmpV.z);
+    rig.rotation.y-=yaw;
+  }
+  function camPos(){ return rig.getWorldPosition(tmpV3); }
+  function forward(){ return cam.getWorldDirection(new THREE.Vector3()); }
+  function trackRom(){
+    const d=forward();
+    const yaw=THREE.MathUtils.radToDeg(Math.atan2(d.x,-d.z));
+    const pit=THREE.MathUtils.radToDeg(Math.asin(Math.max(-1,Math.min(1,d.y))));
+    if (yaw<0) vrRom.L=Math.max(vrRom.L,-yaw); else vrRom.R=Math.max(vrRom.R,yaw);
+    if (pit>0) vrRom.U=Math.max(vrRom.U,pit); else vrRom.D=Math.max(vrRom.D,-pit);
+  }
+  const vrRomStats=()=>[['Rotasyon sol/sağ',Math.round(Math.min(120,vrRom.L))+'° / '+Math.round(Math.min(120,vrRom.R))+'°'],
+                        ['Aşağı/yukarı',Math.round(vrRom.D)+'° / '+Math.round(vrRom.U)+'°']];
+
+  // --- doku yardımcıları ---
+  function cnvTex(px,py,draw){ const c=document.createElement('canvas'); c.width=px; c.height=py;
+    draw(c.getContext('2d'),px,py); const t=new THREE.CanvasTexture(c); return {tex:t,cnv:c}; }
+  function emojiSprite(ch,s){ const {tex}=cnvTex(128,128,(c)=>{ c.font='100px serif'; c.textAlign='center'; c.textBaseline='middle'; c.fillText(ch,64,70); });
+    const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:tex,transparent:true})); sp.scale.set(s,s,1); return sp; }
+  function glowSprite(color,s){ const {tex}=cnvTex(128,128,(c)=>{ const g=c.createRadialGradient(64,64,4,64,64,60);
+      g.addColorStop(0,'#fff'); g.addColorStop(.3,color); g.addColorStop(1,'rgba(0,0,0,0)');
+      c.fillStyle=g; c.fillRect(0,0,128,128); });
+    const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:tex,transparent:true,depthWrite:false})); sp.scale.set(s,s,1); return sp; }
+  function balloonSprite(hue,s){ const {tex}=cnvTex(128,160,(c)=>{
+      const g=c.createRadialGradient(45,50,8,64,70,60);
+      g.addColorStop(0,`hsl(${hue} 90% 80%)`); g.addColorStop(1,`hsl(${hue} 75% 52%)`);
+      c.fillStyle=g; c.beginPath(); c.ellipse(64,64,46,56,0,0,7); c.fill();
+      c.beginPath(); c.moveTo(58,122); c.lineTo(70,122); c.lineTo(64,132); c.fill();
+      c.strokeStyle='rgba(90,60,30,.6)'; c.beginPath(); c.moveTo(64,132); c.quadraticCurveTo(72,146,64,158); c.stroke(); });
+    const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:tex,transparent:true})); sp.scale.set(s,s*1.25,1); return sp; }
+  function textPanel(wU,hU,drawFn){
+    const px=512, py=Math.round(512*hU/wU);
+    const o=cnvTex(px,py,(c)=>drawPanelBg(c,px,py));
+    const mesh=new THREE.Mesh(new THREE.PlaneGeometry(wU,hU),
+      new THREE.MeshBasicMaterial({map:o.tex,transparent:true}));
+    mesh.userData={cnv:o.cnv,tex:o.tex};
+    mesh.redraw=(fn)=>{ const c=o.cnv.getContext('2d'); c.clearRect(0,0,px,py); drawPanelBg(c,px,py); fn(c,px,py); o.tex.needsUpdate=true; };
+    if (drawFn) mesh.redraw(drawFn);
+    return mesh;
+  }
+  function drawPanelBg(c,w,h){
+    c.fillStyle='rgba(18,38,66,.88)';
+    const r=26; c.beginPath();
+    c.moveTo(r,0); c.arcTo(w,0,w,h,r); c.arcTo(w,h,0,h,r); c.arcTo(0,h,0,0,r); c.arcTo(0,0,w,0,r); c.fill();
+    c.strokeStyle='rgba(255,255,255,.35)'; c.lineWidth=3; c.stroke();
+  }
+
+  // --- bakış (gaze) sistemi ---
+  function addGaze(mesh, angDeg, needMs, cb){ gazeTargets.push({mesh, angR:THREE.MathUtils.degToRad(angDeg), need:needMs, prog:0, cb}); }
+  function clearGaze(){ gazeTargets.length=0; }
+  function updateGaze(dt){
+    const dir=forward(), cp=camPos();
+    let best=0;
+    for (const t of gazeTargets){
+      if (!t.mesh.visible){ t.prog=0; continue; }
+      t.mesh.getWorldPosition(tmpV2).sub(cp).normalize();
+      const ang=dir.angleTo(tmpV2);
+      if (ang<t.angR){ t.prog+=dt*1000; best=Math.max(best,t.prog/t.need);
+        if (t.prog>=t.need){ t.prog=0; tone(700,.12,.2,1.5); t.cb(); break; } }
+      else t.prog=Math.max(0,t.prog-dt*2200);
+      best=Math.max(best,t.prog/t.need);
+    }
+    drawReticle(Math.min(1,best));
+  }
+  let lastFrac=-1;
+  function drawReticle(frac){
+    if (Math.abs(frac-lastFrac)<.02 && frac>0 && lastFrac>0) return;
+    lastFrac=frac;
+    const c=retC.getContext('2d'); c.clearRect(0,0,64,64);
+    c.strokeStyle='rgba(255,255,255,.9)'; c.lineWidth=4;
+    c.beginPath(); c.arc(32,32,12,0,7); c.stroke();
+    if (frac>0){ c.strokeStyle='#ff8c42'; c.lineWidth=6;
+      c.beginPath(); c.arc(32,32,20,-Math.PI/2,-Math.PI/2+frac*Math.PI*2); c.stroke(); }
+    retTex.needsUpdate=true;
+  }
+
+  // --- parçacıklar ---
+  function puff(pos,color,n=12){
+    for(let i=0;i<n;i++){ const sp=glowSprite(color,.7);
+      sp.position.copy(pos); scene.add(sp);
+      particles.push({sp, vel:new THREE.Vector3((Math.random()-.5)*6,(Math.random()-.2)*6,(Math.random()-.5)*6), life:.7}); }
+  }
+  function updParticles(dt){
+    for(let i=particles.length-1;i>=0;i--){ const p=particles[i];
+      p.life-=dt; p.sp.position.addScaledVector(p.vel,dt); p.sp.material.opacity=Math.max(0,p.life/.7);
+      if (p.life<=0){ scene.remove(p.sp); particles.splice(i,1); } }
+  }
+
+  // --- HUD ---
+  function makeHud(){
+    hudC=document.createElement('canvas'); hudC.width=512; hudC.height=96;
+    hudTex=new THREE.CanvasTexture(hudC);
+    hud=new THREE.Mesh(new THREE.PlaneGeometry(1.7,.32), new THREE.MeshBasicMaterial({map:hudTex,transparent:true,depthTest:false}));
+    hud.renderOrder=999; hud.position.set(0,-.85,-2.2); cam.add(hud);
+  }
+  function hudDraw(lines, fuelPct){
+    const c=hudC.getContext('2d'); c.clearRect(0,0,512,96);
+    c.fillStyle='rgba(10,25,50,.6)'; c.fillRect(0,0,512,96);
+    c.fillStyle='#fff'; c.font='bold 34px sans-serif'; c.textAlign='center';
+    c.fillText(lines,256, fuelPct!==undefined?40:58);
+    if (fuelPct!==undefined){
+      c.fillStyle='rgba(255,255,255,.25)'; c.fillRect(56,58,400,22);
+      c.fillStyle= fuelPct<25?'#ff5e62':'#ffd23f'; c.fillRect(56,58,400*Math.max(0,fuelPct)/100,22);
+    }
+    hudTex.needsUpdate=true;
+  }
+
+  // --- sahne temizle / ev düğmesi ---
+  function newWorld(bg, fog){
+    if (world) scene.remove(world);
+    clearGaze(); particles.forEach(p=>scene.remove(p.sp)); particles=[];
+    rig.position.set(0,0,0); rig.rotation.z=0;
+    cam.children.filter(ch=>ch.userData && ch.userData.gameUI).forEach(ch=>cam.remove(ch));
+    world=new THREE.Group(); scene.add(world);
+    scene.background=new THREE.Color(bg);
+    scene.fog = fog ? new THREE.Fog(bg, fog[0], fog[1]) : null;
+    return world;
+  }
+  function addHomeBtn(){
+    const home=textPanel(1.6,.8,(c,w,h)=>{ c.font='60px serif'; c.textAlign='center'; c.fillText('🏠',w/2,h/2+8);
+      c.fillStyle='#fff'; c.font='bold 30px sans-serif'; c.fillText('Menü',w/2,h-18); });
+    home.position.set(0,-5,-2.4); home.lookAt(0,0,0);
+    world.add(home);
+    addGaze(home, 12, 1600, ()=>showMenu());
+    return home;
+  }
+
+  // ============ VR MENÜ ============
+  function showMenu(){
+    state='menu'; recenter();
+    const w=newWorld(0x27476e);
+    const items=[
+      {id:'sky360', e:'🎈', t:'Gökyüzü 360°', d:'Etrafındaki balonları patlat'},
+      {id:'cockpit', e:'✈️', t:'Kokpit', d:'Baktığın yöne uç, halkalardan geç'},
+      {id:'stars', e:'⭐', t:'Yıldız Gözlemcisi', d:'Takımyıldızları birleştir'},
+      {id:'garden', e:'🪰', t:'Ateşböceği Bahçesi', d:'Işığı yumuşakça takip et'},
+    ];
+    items.forEach((it,i)=>{
+      const yaw=THREE.MathUtils.degToRad(-51+i*34);
+      const p=textPanel(2.5,2.1,(c,w2,h2)=>{
+        c.font='90px serif'; c.textAlign='center'; c.fillText(it.e,w2/2,150);
+        c.fillStyle='#ffd23f'; c.font='bold 44px sans-serif'; c.fillText(it.t,w2/2,240);
+        c.fillStyle='#dce8f5'; c.font='30px sans-serif';
+        wrap(c,it.d,w2/2,300,w2-60,38);
+      });
+      p.position.set(Math.sin(yaw)*6.5, .2, -Math.cos(yaw)*6.5);
+      p.lookAt(0,0,0);
+      world.add(p);
+      addGaze(p, 10, 1300, ()=>startGame(it.id));
+    });
+    const info=textPanel(5,.9,(c,w2,h2)=>{ c.fillStyle='#fff'; c.font='bold 40px sans-serif'; c.textAlign='center';
+      c.fillText('Bir oyuna bak ve bekle 👀  |  çıkış: ekrana çift dokun', w2/2, h2/2+12); });
+    info.position.set(0,3.4,-7); info.lookAt(0,0,0); world.add(info);
+    hudDraw('Boyun Egzersiz VR — hoş geldin');
+  }
+  function wrap(c,txt,x,y,maxW,lh){ const words=txt.split(' '); let line='';
+    for(const wd of words){ const t=line+wd+' ';
+      if (c.measureText(t).width>maxW){ c.fillText(line,x,y); line=wd+' '; y+=lh; } else line=t; }
+    c.fillText(line,x,y); }
+
+  // ============ SONUÇ PANELİ ============
+  function showEnd(title, stats){
+    state='end'; recenter();
+    const w=newWorld(0x1d3550);
+    const panel=textPanel(4.6,3.4,(c,w2,h2)=>{
+      c.fillStyle='#ffd23f'; c.font='bold 52px sans-serif'; c.textAlign='center'; c.fillText(title,w2/2,70);
+      c.font='32px sans-serif';
+      stats.forEach(([l,v],i)=>{ const y=130+i*46;
+        c.fillStyle='#9fc3e8'; c.textAlign='left'; c.fillText(l, 50, y);
+        c.fillStyle='#fff'; c.textAlign='right'; c.fillText(String(v), w2-50, y); });
+    });
+    panel.position.set(0,.5,-6); world.add(panel);
+    const again=textPanel(1.9,.9,(c,w2,h2)=>{ c.fillStyle='#7CFC90'; c.font='bold 44px sans-serif'; c.textAlign='center'; c.fillText('🔁 Tekrar',w2/2,h2/2+14); });
+    again.position.set(-1.5,-2.4,-6); world.add(again);
+    addGaze(again,9,1400,()=>startGame(lastVRGame));
+    const menu=textPanel(1.9,.9,(c,w2,h2)=>{ c.fillStyle='#fff'; c.font='bold 44px sans-serif'; c.textAlign='center'; c.fillText('🏠 Menü',w2/2,h2/2+14); });
+    menu.position.set(1.5,-2.4,-6); world.add(menu);
+    addGaze(menu,9,1400,()=>showMenu());
+    hudDraw('Mola ver, omuzlarını gevşet 🙂');
+  }
+
+  // ============ OYUNLAR ============
+  const G={};
+  function startGame(id){ lastVRGame=id; vrRom={L:0,R:0,U:0,D:0}; state=id; recenter(); rig.position.set(0,0,0); rig.rotation.z=0; G[id].init(); }
+
+  // --- Gökyüzü 360 ---
+  G.sky360={ o:{},
+    init(){ const g=this.o;
+      Object.assign(g,{ time:180, score:0, hits:0, spread:55, balloons:[], lastSp:0, t:0 });
+      const w=newWorld(0x87ceeb, [40,120]);
+      // bulut süsleri
+      for(let i=0;i<14;i++){ const cl=emojiSprite('☁️',4+Math.random()*3);
+        const a=Math.random()*Math.PI*2, p2=Math.random()*.5;
+        cl.position.set(Math.sin(a)*30, 6+Math.sin(p2)*14, -Math.cos(a)*30); w.add(cl); }
+      addHomeBtn();
+    },
+    update(dt){ const g=this.o;
+      g.t+=dt; g.time-=dt;
+      if (g.time<=0){ showEnd('🏁 Oturum Bitti',[['Puan',g.score],['Patlatılan',g.hits],...vrRomStats()]); return; }
+      if (g.t-g.lastSp>1.7 && g.balloons.length<3){
+        g.lastSp=g.t;
+        const yaw=THREE.MathUtils.degToRad((Math.random()*2-1)*g.spread);
+        const pit=THREE.MathUtils.degToRad(-8+Math.random()*45);
+        const r=9, hue=Math.random()*360;
+        const b=balloonSprite(hue,1.6);
+        b.position.set(Math.sin(yaw)*Math.cos(pit)*r, Math.sin(pit)*r, -Math.cos(yaw)*Math.cos(pit)*r);
+        world.add(b); g.balloons.push(b);
+        addGaze(b, 6, 800, ()=>{
+          world.remove(b); g.balloons=g.balloons.filter(x=>x!==b);
+          gazeTargets=gazeTargets.filter(t=>t.mesh!==b);
+          g.hits++; g.score+=10; tone(550,.2,.3,2);
+          puff(b.position,'#ffb0c0');
+          if (g.hits%5===0){ g.spread=Math.min(150,g.spread+16); tone(900,.25,.25,1.4); }
+        });
+      }
+      g.balloons.forEach(b=>{ b.position.y+=Math.sin(g.t*2+b.position.x)*.004; });
+      hudDraw('⭐ '+g.score+'   ⏱ '+Math.floor(g.time/60)+':'+String(Math.floor(g.time%60)).padStart(2,'0'));
+    }};
+
+  // --- Kokpit ---
+  G.cockpit={ o:{},
+    init(){ const g=this.o;
+      Object.assign(g,{ t:0, score:0, rings:0, fuel:100, fuelGot:0, speed:16, dir:new THREE.Vector3(0,0,-1),
+        objs:[], lastRing:0, lastFuel:0, lastObs:0, crashed:false, crashT:0, reason:'' });
+      const w=newWorld(0x7ec2e8, [60,260]);
+      // deniz
+      g.sea=new THREE.Mesh(new THREE.PlaneGeometry(1200,1200), new THREE.MeshBasicMaterial({color:0x1d6fa8}));
+      g.sea.rotation.x=-Math.PI/2; g.sea.position.y=-25; w.add(g.sea);
+      // kokpit çerçevesi
+      g.dash=new THREE.Mesh(new THREE.PlaneGeometry(3.6,1.3), new THREE.MeshBasicMaterial({color:0x22303e}));
+      g.dash.position.set(0,-1.55,-2); g.dash.rotation.x=-.55; g.dash.userData.gameUI=true; cam.add(g.dash);
+      g.home=addHomeBtn();
+    },
+    spawn(type){ const g=this.o;
+      const f=g.dir.clone(), cp=camPos();
+      const side=new THREE.Vector3().crossVectors(f,new THREE.Vector3(0,1,0)).normalize();
+      const off=side.multiplyScalar((Math.random()*2-1)*22).add(new THREE.Vector3(0,(Math.random()*2-1)*12,0));
+      const pos=cp.clone().addScaledVector(f,85).add(off);
+      let m;
+      if (type==='ring'){ m=new THREE.Mesh(new THREE.TorusGeometry(3,.35,10,28), new THREE.MeshBasicMaterial({color:0xffd23f}));
+        m.lookAt(cp); }
+      else if (type==='fuel'){ m=emojiSprite('⛽',3); }
+      else { m=emojiSprite('🌩',4.5); }
+      m.userData={type};
+      world.add(m); m.position.copy(pos); g.objs.push(m);
+    },
+    update(dt){ const g=this.o;
+      if (g.crashed){
+        g.crashT+=dt; rig.position.y-=dt*30*g.crashT; rig.rotation.z+=dt*1.5;
+        if (g.crashT>1.5){
+          cam.remove(g.dash); rig.rotation.z=0;
+          showEnd('💥 Uçak Düştü — '+g.reason,[
+            ['Puan',Math.floor(g.score)],['Geçilen halka',g.rings],
+            ['Havada kalma',Math.floor(g.t)+' sn'],['Toplanan yakıt',g.fuelGot],...vrRomStats()]);
+        }
+        return;
+      }
+      g.t+=dt; g.speed=16+g.t*.2; g.score+=dt*2;
+      g.fuel-=dt*2;
+      if (g.fuel<=0){ g.crashed=true; g.crashT=0; g.reason='yakıt bitti'; tone(180,.6,.4,.4); return; }
+      // baktığın yöne yumuşak dönüş
+      const f=forward(); g.dir.lerp(f,.03).normalize();
+      rig.position.addScaledVector(g.dir, g.speed*dt);
+      g.sea.position.x=rig.position.x; g.sea.position.z=rig.position.z;
+      // ev düğmesi oyuncuyla birlikte gelsin (altında)
+      g.home.position.copy(rig.position).addScaledVector(g.dir,2.5).add(tmpV2.set(0,-5.5,0));
+      g.home.lookAt(camPos());
+      if (g.t-g.lastRing>2.4){ this.spawn('ring'); g.lastRing=g.t; }
+      if (g.t-g.lastFuel>9){ this.spawn('fuel'); g.lastFuel=g.t; }
+      if (g.t>8 && g.t-g.lastObs>4){ this.spawn('obs'); g.lastObs=g.t; }
+      const cp=camPos();
+      for (let i=g.objs.length-1;i>=0;i--){
+        const o=g.objs[i];
+        tmpV.copy(o.position).sub(cp);
+        const along=tmpV.dot(g.dir);
+        if (along<0){ // geçildi
+          const d=o.position.distanceTo(cp);
+          const ty=o.userData.type;
+          if (ty==='ring' && d<3.6){ g.rings++; g.score+=25; tone(880,.2,.3,1.6); puff(o.position,'#ffd23f',16); }
+          else if (ty==='fuel' && d<3.4){ g.fuelGot++; g.fuel=Math.min(100,g.fuel+32); tone(520,.25,.3,1.3); }
+          else if (ty==='obs' && d<3){ g.crashed=true; g.crashT=0; g.reason='fırtınaya çarptın'; tone(180,.6,.4,.4); return; }
+          world.remove(o); g.objs.splice(i,1);
+        } else if (along>150){ world.remove(o); g.objs.splice(i,1); }
+      }
+      hudDraw('⭐ '+Math.floor(g.score)+'   ⛳ '+g.rings, g.fuel);
+    }};
+
+  // --- Yıldız Gözlemcisi ---
+  const CONST=[
+    { n:'Büyükayı', yaw:0,  pit:30, pts:[[0,0],[1,.15],[2,.05],[3,.3],[3.3,1],[2.3,1.15],[2,.35]] },
+    { n:'Orion',    yaw:-65,pit:18, pts:[[0,0],[.5,.9],[1,1.8],[1.7,1.75],[2.2,.85],[1.6,0],[0,0]] },
+    { n:'Kuğu',     yaw:65, pit:25, pts:[[0,0],[.8,.6],[1.6,1.2],[.9,1.5],[2.4,.9]] },
+    { n:'Akrep',    yaw:-115,pit:8, pts:[[0,0],[.7,-.3],[1.4,-.2],[2,.3],[2.5,1]] },
+    { n:'Boğa',     yaw:115,pit:12, pts:[[0,0],[.8,.4],[1.6,.5],[1,1.1],[2.2,1.2]] },
+  ];
+  G.stars={ o:{},
+    init(){ const g=this.o;
+      Object.assign(g,{ time:240, done:0, idx:0, star:0, t:0 });
+      const w=newWorld(0x050a18);
+      // yıldız arka planı
+      const geo=new THREE.BufferGeometry(); const v=[];
+      for(let i=0;i<800;i++){ const a=Math.random()*Math.PI*2, p2=(Math.random()-.35)*Math.PI;
+        v.push(Math.sin(a)*Math.cos(p2)*90,Math.sin(p2)*90,-Math.cos(a)*Math.cos(p2)*90); }
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(v,3));
+      w.add(new THREE.Points(geo, new THREE.PointsMaterial({color:0xbfd4ff,size:.7})));
+      // ay
+      const moon=glowSprite('#f5f0d0',10); moon.position.set(25,35,-60); w.add(moon);
+      g.groups=CONST.map(cn=>{
+        const grp=new THREE.Group();
+        const base=new THREE.Vector3(
+          Math.sin(THREE.MathUtils.degToRad(cn.yaw))*Math.cos(THREE.MathUtils.degToRad(cn.pit)),
+          Math.sin(THREE.MathUtils.degToRad(cn.pit)),
+          -Math.cos(THREE.MathUtils.degToRad(cn.yaw))*Math.cos(THREE.MathUtils.degToRad(cn.pit))).multiplyScalar(60);
+        const right=new THREE.Vector3().crossVectors(new THREE.Vector3(0,1,0),base).normalize();
+        const up=new THREE.Vector3().crossVectors(base,right).normalize().negate();
+        grp.userData={ stars: cn.pts.map(([px,py])=>{
+          const s=glowSprite('#ffe9a0',2.2);
+          s.position.copy(base).addScaledVector(right,px*7).addScaledVector(up,py*7);
+          w.add(s); return s; }), name:cn.n, lines:[] };
+        w.add(grp); return grp;
+      });
+      this.arm(); addHomeBtn();
+      hudDraw('İlk yıldıza bak: '+CONST[0].n);
+    },
+    arm(){ const g=this.o;
+      // aktif yıldıza gaze hedefi koy
+      gazeTargets=gazeTargets.filter(t=>!t.isStar);
+      if (g.idx>=CONST.length) return;
+      const grp=g.groups[g.idx], st=grp.userData.stars[g.star];
+      const gz={ mesh:st, angR:THREE.MathUtils.degToRad(4.5), need:900, prog:0, isStar:true, cb:()=>{
+        st.material.color=new THREE.Color('#ffd23f'); st.scale.multiplyScalar(1.5);
+        tone(600+g.star*60,.25,.3,1.3);
+        if (g.star>0){
+          const prev=grp.userData.stars[g.star-1];
+          const lg=new THREE.BufferGeometry().setFromPoints([prev.position,st.position]);
+          world.add(new THREE.Line(lg,new THREE.LineBasicMaterial({color:0xffe9a0})));
+        }
+        g.star++;
+        if (g.star>=grp.userData.stars.length){
+          g.done++; g.idx++; g.star=0; tone(880,.5,.3,1.5);
+          toastVR('✨ '+grp.userData.name+' tamamlandı!');
+          if (g.idx>=CONST.length){ this.o.finished=true; return; }
+        }
+        this.arm();
+      }};
+      gazeTargets.push(gz);
+    },
+    update(dt){ const g=this.o;
+      g.t+=dt; g.time-=dt;
+      // aktif yıldız nabzı
+      if (g.idx<CONST.length){
+        const st=g.groups[g.idx].userData.stars[g.star];
+        st.material.opacity=.6+.4*Math.sin(g.t*4);
+      }
+      if (g.finished || g.time<=0){
+        showEnd('🌌 Gece Bitti',[['Takımyıldız',g.done+' / '+CONST.length],['Süre',Math.floor(240-g.time)+' sn'],...vrRomStats()]);
+        return;
+      }
+      hudDraw((g.idx<CONST.length? '🌟 '+CONST[g.idx].n+' — yıldız '+(g.star+1) : '')+'   ⏱ '+Math.floor(g.time)+' sn');
+    }};
+
+  // --- Ateşböceği Bahçesi ---
+  G.garden={ o:{},
+    init(){ const g=this.o;
+      Object.assign(g,{ time:180, light:0, score:0, t:0, baseYaw:0, lastShift:0, prevDir:forward() });
+      const w=newWorld(0x08120a, [10,60]);
+      const ground=new THREE.Mesh(new THREE.CircleGeometry(45,32), new THREE.MeshBasicMaterial({color:0x0d1f10}));
+      ground.rotation.x=-Math.PI/2; ground.position.y=-2.5; w.add(ground);
+      for(let i=0;i<12;i++){ const a=Math.random()*Math.PI*2, r=12+Math.random()*20;
+        const tree=new THREE.Mesh(new THREE.ConeGeometry(1.5+Math.random(),5+Math.random()*4,7),
+          new THREE.MeshBasicMaterial({color:0x0a1a0d}));
+        tree.position.set(Math.sin(a)*r,-.5,-Math.cos(a)*r); w.add(tree); }
+      // yıldızlı gökyüzü hafif
+      const geo=new THREE.BufferGeometry(); const v=[];
+      for(let i=0;i<200;i++){ const a=Math.random()*Math.PI*2, p2=Math.random()*.9;
+        v.push(Math.sin(a)*Math.cos(p2)*70,Math.sin(p2)*70,-Math.cos(a)*Math.cos(p2)*70); }
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(v,3));
+      w.add(new THREE.Points(geo,new THREE.PointsMaterial({color:0x88aacc,size:.5})));
+      g.fly=glowSprite('#b8ff70',1.2); w.add(g.fly);
+      addHomeBtn();
+    },
+    update(dt){ const g=this.o;
+      g.t+=dt; g.time-=dt;
+      if (g.time<=0){
+        showEnd('🌿 Bahçe Kapandı',[['Işık puanı',Math.floor(g.score)],['Takip oranı',Math.round(100*g.light/180)+'%'],...vrRomStats()]);
+        return;
+      }
+      if (g.t-g.lastShift>22){ g.baseYaw+=THREE.MathUtils.degToRad(75)*(Math.random()<.5?-1:1); g.lastShift=g.t; toastVR('Ateşböceği başka köşeye uçtu 🪰'); }
+      const yaw=g.baseYaw+THREE.MathUtils.degToRad(38)*Math.sin(g.t*.14);
+      const pit=THREE.MathUtils.degToRad(8)+THREE.MathUtils.degToRad(14)*Math.sin(g.t*.23);
+      const r=6;
+      g.fly.position.set(Math.sin(yaw)*Math.cos(pit)*r, Math.sin(pit)*r, -Math.cos(yaw)*Math.cos(pit)*r);
+      // baş hızı (yumuşaklık)
+      const d=forward();
+      const angV=d.angleTo(g.prevDir)/Math.max(dt,1e-4); g.prevDir=d.clone();
+      const calm=angV<1.1; // rad/sn
+      tmpV.copy(g.fly.position).normalize();
+      const on = d.angleTo(tmpV) < THREE.MathUtils.degToRad(7);
+      if (on && calm){ g.light+=dt; g.score+=dt*10; g.fly.scale.setScalar(1.6+.4*Math.sin(g.t*6)); }
+      else g.fly.scale.setScalar(1+.15*Math.sin(g.t*6));
+      g.fly.material.opacity = on&&calm ? 1 : .55;
+      hudDraw((calm?'':'YAVAŞ… ')+'💡 '+Math.floor(g.score)+'   ⏱ '+Math.floor(g.time)+' sn');
+    }};
+
+  // VR içi kısa mesaj
+  let vrToastMesh=null, vrToastT=0;
+  function toastVR(msg){
+    if (vrToastMesh) cam.remove(vrToastMesh);
+    vrToastMesh=textPanel(2.6,.5,(c,w2,h2)=>{ c.fillStyle='#fff'; c.font='bold 34px sans-serif'; c.textAlign='center'; c.fillText(msg,w2/2,h2/2+12); });
+    vrToastMesh.position.set(0,.75,-2.4); vrToastMesh.material.depthTest=false; vrToastMesh.renderOrder=998;
+    cam.add(vrToastMesh); vrToastT=2.2;
+  }
+
+  // ============ BAŞLAT / DÖNGÜ ============
+  function init(){
+    if (inited) return;
+    inited=true;
+    renderer=new THREE.WebGLRenderer({canvas:$('v'), antialias:true});
+    renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+    renderer.setSize(innerWidth,innerHeight);
+    addEventListener('resize',()=>{ renderer.setSize(innerWidth,innerHeight); cam.aspect=innerWidth/innerHeight; cam.updateProjectionMatrix(); });
+    scene=new THREE.Scene();
+    rig=new THREE.Group(); scene.add(rig);
+    cam=new THREE.PerspectiveCamera(75, innerWidth/innerHeight, .1, 600);
+    rig.add(cam);
+    stereo=new THREE.StereoCamera(); stereo.eyeSep=.064;
+    // retikül
+    retC=document.createElement('canvas'); retC.width=64; retC.height=64;
+    retTex=new THREE.CanvasTexture(retC);
+    reticle=new THREE.Sprite(new THREE.SpriteMaterial({map:retTex,transparent:true,depthTest:false}));
+    reticle.scale.set(.09,.09,1); reticle.position.set(0,0,-1.5); reticle.renderOrder=1000;
+    cam.add(reticle); drawReticle(0);
+    makeHud();
+    clock=new THREE.Clock();
+  }
+  let clock=null;
+  function start(){
+    init();
+    S.mode='vr'; setScene('vr');
+    $('v').style.display='block'; $('camPreview').style.display='none';
+    showMenu();
+    renderer.setAnimationLoop(loopVR);
+  }
+  function stop(){
+    renderer.setAnimationLoop(null);
+    $('v').style.display='none';
+    setScene('mode');
+  }
+  function loopVR(){
+    const dt=Math.min(.05,clock.getDelta());
+    updateCamQuat(); trackRom(); updateGaze(dt); updParticles(dt);
+    if (vrToastMesh){ vrToastT-=dt; if (vrToastT<=0){ cam.remove(vrToastMesh); vrToastMesh=null; } }
+    if (G[state]) G[state].update(dt);
+    // stereo çizim
+    cam.updateMatrixWorld();
+    stereo.update(cam);
+    const sz=renderer.getSize(new THREE.Vector2());
+    renderer.setScissorTest(true);
+    renderer.setScissor(0,0,sz.x/2,sz.y); renderer.setViewport(0,0,sz.x/2,sz.y);
+    renderer.render(scene,stereo.cameraL);
+    renderer.setScissor(sz.x/2,0,sz.x/2,sz.y); renderer.setViewport(sz.x/2,0,sz.x/2,sz.y);
+    renderer.render(scene,stereo.cameraR);
+    renderer.setScissorTest(false);
+  }
+  // çift dokunma = VR'dan çık
+  let lastTap=0;
+  $('v').addEventListener('touchend',()=>{ const n=Date.now(); if (n-lastTap<350) stop(); lastTap=n; });
+  $('v').addEventListener('dblclick',()=>stop());
+
+  return { start, stop };
+})();
+
+$('vrStartBtn').onclick = async () => {
+  try { if (typeof DeviceOrientationEvent!=='undefined' && DeviceOrientationEvent.requestPermission)
+    await DeviceOrientationEvent.requestPermission(); } catch(e){}
+  try { await document.documentElement.requestFullscreen(); } catch(e){}
+  try { await screen.orientation.lock('landscape'); } catch(e){}
+  VR.start();
+};
+
+// ==================== ANA DÖNGÜ (2D) ====================
+let lastT=0;
+function loop(now){
+  requestAnimationFrame(loop);
+  if (S.scene==='vr') return; // VR kendi döngüsünü kullanır
+  const dt=Math.min(.05,(now-lastT)/1000); lastT=now;
+  updateCursorUI(dt);
+  if (S.scene==='game' && S.game && GAMES[S.game]){
+    GAMES[S.game].update(dt, now);
+    if (S.scene==='game'){ GAMES[S.game].draw(dt, now); noFaceBanner(); }
+  } else drawSkyBg(dt);
+}
+requestAnimationFrame(loop);
+
+// ==================== AKIŞ / BUTONLAR ====================
+$('modePhone').onclick = () => setScene('phoneStart');
+$('modeVR').onclick = () => setScene('vrStart');
+$('backModeBtn').onclick = () => setScene('mode');
+$('backModeBtn2').onclick = () => setScene('mode');
+
+$('startBtn').onclick = async () => {
+  S.mode='cam'; setScene('calib');
+  try { await startCamera(); }
+  catch(e){
+    $('calMsg').textContent='Kameraya erişilemedi ('+(e.name||'hata')+'). Tarayıcı izni ve HTTPS gerekli. Dokunmatik moda geçebilirsin.';
+    const b=$('calBtn'); b.classList.remove('hidden'); b.textContent='Dokunmatik modda oyna'; b.onclick=startTouch; return;
+  }
+  const wait=setInterval(()=>{ if (S.faceSeen){ clearInterval(wait);
+    $('calMsg').textContent='Yüz bulundu ✅ Başını dik ve rahat tut, karşıya bak, sonra butona bas.'; show('calBtn'); } },300);
+};
+$('calBtn').onclick = () => { S.cal.yaw=S.raw.yaw; S.cal.pitch=S.raw.pitch; S.calibrated=true; setScene('hub'); };
+function startTouch(){ S.mode='touch'; S.calibrated=true; setScene('hub'); toast('Dokunmatik mod: parmağınla oyna, kartlara dokun'); }
+$('touchBtn').onclick=startTouch;
+
+document.querySelectorAll('#hubCards .gameCard').forEach(el=>{
+  el.onclick = () => { const id=el.dataset.game; if (GAMES[id]) gameBegin(id); else toast('Bu oyun henüz hazır değil'); };
+});
+$('recalBtn').onclick = () => {
+  if (S.mode!=='cam'){ toast('Dokunmatik moddasın'); return; }
+  setScene('calib'); $('calMsg').textContent='Başını dik tut, karşıya bak ve butona bas.'; show('calBtn');
+};
+
+function pointAt(ev){ if (S.mode!=='touch') return;
+  const p=ev.touches?ev.touches[0]:ev; S.cross.x=p.clientX; S.cross.y=p.clientY; }
+addEventListener('touchmove',pointAt,{passive:true});
+addEventListener('touchstart',pointAt,{passive:true});
+addEventListener('mousemove',pointAt);
+
+$('pauseBtn').onclick = () => { if (S.scene==='game') setScene('pause'); };
+$('resumeBtn').onclick = () => setScene('game');
+$('quitBtn').onclick = () => { if (S.game) GAMES[S.game].quit(); };
+$('againBtn').onclick = () => gameBegin(S.lastGame);
+$('menuBtn').onclick = () => setScene('hub');
+</script>
+</body>
+</html>
