@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Gökyüzü Avcısı — Boyun Egzersiz Oyunu</title>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body { width:100%; height:100%; overflow:hidden; font-family:-apple-system,'Segoe UI',Roboto,sans-serif; background:#87CEEB; touch-action:none; }
+  #game { position:fixed; inset:0; }
+  canvas#c { position:absolute; inset:0; width:100%; height:100%; }
+  video { position:absolute; width:1px; height:1px; opacity:0; pointer-events:none; }
+  #camPreview { position:absolute; bottom:12px; left:12px; width:88px; height:66px; border-radius:10px; border:2px solid rgba(255,255,255,.7); object-fit:cover; transform:scaleX(-1); opacity:.85; z-index:5; display:none; }
+
+  .overlay { position:fixed; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:24px; z-index:20;
+             background:linear-gradient(180deg,#4A90D9 0%,#87CEEB 60%,#c8e8f5 100%); color:#fff; }
+  .overlay h1 { font-size:2rem; margin-bottom:6px; text-shadow:0 2px 8px rgba(0,0,0,.25); }
+  .overlay .sub { font-size:.95rem; opacity:.95; max-width:420px; line-height:1.45; margin-bottom:18px; }
+  .card { background:rgba(255,255,255,.92); color:#234; border-radius:16px; padding:18px 20px; max-width:420px; width:100%; box-shadow:0 8px 30px rgba(0,0,0,.18); }
+  .card h2 { font-size:1.05rem; margin-bottom:10px; color:#1a4a7a; }
+  .card p { font-size:.88rem; line-height:1.5; margin-bottom:8px; text-align:left; }
+  .warn { background:#fff6e0; border-left:4px solid #f0a824; padding:8px 10px; border-radius:6px; font-size:.82rem; text-align:left; color:#6a4a00; margin-top:8px; }
+  button.big { margin-top:16px; padding:14px 34px; font-size:1.1rem; font-weight:700; color:#fff; background:linear-gradient(135deg,#ff8c42,#ff5e62);
+               border:none; border-radius:999px; box-shadow:0 6px 18px rgba(255,94,98,.45); cursor:pointer; }
+  button.big:active { transform:scale(.96); }
+  button.ghost { margin-top:10px; padding:10px 22px; font-size:.9rem; color:#fff; background:rgba(255,255,255,.18); border:1px solid rgba(255,255,255,.55); border-radius:999px; cursor:pointer; }
+
+  #hud { position:fixed; top:0; left:0; right:0; display:flex; justify-content:space-between; align-items:center; padding:10px 14px; z-index:10; pointer-events:none; }
+  .pill { background:rgba(0,40,80,.45); color:#fff; padding:6px 14px; border-radius:999px; font-weight:700; font-size:.95rem; backdrop-filter:blur(4px); }
+  #pauseBtn { pointer-events:auto; background:rgba(0,40,80,.45); border:none; color:#fff; font-size:1rem; padding:6px 14px; border-radius:999px; cursor:pointer; }
+  #lvlPill { font-size:.8rem; }
+
+  #calOverlay .ring { width:120px; height:120px; border-radius:50%; border:4px dashed rgba(255,255,255,.9); display:flex; align-items:center; justify-content:center; font-size:2.4rem; margin-bottom:16px; animation:pulse 1.6s infinite; }
+  @keyframes pulse { 0%,100%{transform:scale(1)} 50%{transform:scale(1.08)} }
+
+  #toast { position:fixed; top:60px; left:50%; transform:translateX(-50%); background:rgba(0,40,80,.75); color:#fff; padding:8px 18px; border-radius:999px;
+           font-size:.9rem; z-index:30; opacity:0; transition:opacity .3s; pointer-events:none; }
+  .stat-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin:12px 0; }
+  .stat { background:#eef6fd; border-radius:10px; padding:10px; }
+  .stat .v { font-size:1.3rem; font-weight:800; color:#1a4a7a; }
+  .stat .l { font-size:.72rem; color:#567; margin-top:2px; }
+  label.opt { display:flex; align-items:center; gap:8px; font-size:.85rem; color:#234; margin-top:6px; text-align:left; }
+  input[type=range] { width:100%; }
+  .hidden { display:none !important; }
+</style>
+</head>
+<body>
+<div id="game">
+  <canvas id="c"></canvas>
+  <video id="video" playsinline></video>
+  <video id="camPreview" playsinline muted></video>
+</div>
+
+<div id="hud" class="hidden">
+  <span class="pill" id="scorePill">⭐ 0</span>
+  <span class="pill" id="lvlPill">Seviye 1</span>
+  <span class="pill" id="timePill">3:00</span>
+  <button id="pauseBtn">⏸</button>
+</div>
+<div id="toast"></div>
+
+<!-- START -->
+<div id="startOverlay" class="overlay">
+  <h1>🎈 Gökyüzü Avcısı</h1>
+  <div class="sub">Başını hareket ettirerek nişangahı balonlara götür ve üzerinde tutarak patlat. Kronik boyun ağrısı için kinematik egzersiz oyunu.</div>
+  <div class="card">
+    <h2>Nasıl oynanır?</h2>
+    <p>📷 Ön kamera baş hareketini takip eder — telefonu/ekranı göz hizasında sabit tut.</p>
+    <p>🎯 Başını sağa-sola ve yukarı-aşağı çevirerek nişangahı hedefin üzerine getir, <b>patlamasını bekle</b>. Dokunmana gerek yok.</p>
+    <p>🐦 Kuşlar hareket eder — onları başınla <b>takip et</b>.</p>
+    <p>📈 Her seviyede hedefler biraz daha geniş bir alana yayılır (kademeli hareket açıklığı).</p>
+    <div class="warn">⚠️ Ağrı, baş dönmesi veya bulantı hissedersen hemen ara ver. Bu oyun tıbbi tedavinin yerine geçmez; fizyoterapistine danış.</div>
+  </div>
+  <button class="big" id="startBtn">Kameralı Başlat</button>
+  <button class="ghost" id="touchBtn">Kamerasız (dokunmatik) oyna</button>
+</div>
+
+<!-- CALIBRATION -->
+<div id="calOverlay" class="overlay hidden">
+  <div class="ring">🙂</div>
+  <h1 style="font-size:1.4rem">Kalibrasyon</h1>
+  <div class="sub" id="calMsg">Yüzün aranıyor… Kameraya izin ver ve yüzünü göster.</div>
+  <button class="big hidden" id="calBtn">Düz bakıyorum — Kalibre Et</button>
+  <div class="card" style="margin-top:14px; max-width:340px;">
+    <label class="opt">Hassasiyet <input type="range" id="sens" min="1" max="5" step="0.5" value="2.5"></label>
+    <label class="opt"><input type="checkbox" id="invX"> Yatay ekseni ters çevir</label>
+    <label class="opt"><input type="checkbox" id="invY"> Dikey ekseni ters çevir</label>
+  </div>
+</div>
+
+<!-- PAUSE -->
+<div id="pauseOverlay" class="overlay hidden">
+  <h1>⏸ Mola</h1>
+  <div class="sub">Nefes al, omuzlarını gevşet. Hazır olunca devam et.</div>
+  <button class="big" id="resumeBtn">Devam Et</button>
+  <button class="ghost" id="quitBtn">Oturumu Bitir</button>
+</div>
+
+<!-- END -->
+<div id="endOverlay" class="overlay hidden">
+  <h1>🏁 Oturum Bitti</h1>
+  <div class="card">
+    <h2>Seans Özeti</h2>
+    <div class="stat-grid">
+      <div class="stat"><div class="v" id="stScore">0</div><div class="l">Puan</div></div>
+      <div class="stat"><div class="v" id="stHits">0</div><div class="l">Patlatılan hedef</div></div>
+      <div class="stat"><div class="v" id="stAcc">0%</div><div class="l">İsabet oranı</div></div>
+      <div class="stat"><div class="v" id="stLvl">1</div><div class="l">Ulaşılan seviye</div></div>
+      <div class="stat"><div class="v" id="stYaw">—</div><div class="l">Yaklaşık rotasyon (sol/sağ)</div></div>
+      <div class="stat"><div class="v" id="stPitch">—</div><div class="l">Yaklaşık fleks./ekst. (aşağı/yukarı)</div></div>
+    </div>
+    <p style="font-size:.8rem;color:#567">Rotasyon değerleri kameradan tahmindir, klinik ölçüm değildir. Düzenlilik önemli: haftada 3–5 kez, ~15–25 dk hedefle.</p>
+  </div>
+  <button class="big" id="againBtn">Tekrar Oyna</button>
+</div>
+
+<script>
+"use strict";
+// ================== DURUM ==================
+const S = {
+  mode: null,            // 'cam' | 'touch'
+  running: false, paused: false,
+  score: 0, hits: 0, spawned: 0, level: 1,
+  timeLeft: 180, duration: 180,
+  spread: 0.28,          // hedef yayılım yarıçapı (ekran oranı) — kademeli artar
+  targets: [],
+  cross: { x: innerWidth/2, y: innerHeight/2 },
+  raw: { yaw: 0, pitch: 0 }, cal: { yaw: 0, pitch: 0.45 },
+  faceSeen: false, calibrated: false,
+  maxDeg: { L:0, R:0, U:0, D:0 },
+  lastSpawn: 0, popFx: [], clouds: [],
+};
+const DWELL_MS = 800, TARGET_LIFE = 9000, MAX_TARGETS = 2;
+
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+function resize(){ cv.width = innerWidth * devicePixelRatio; cv.height = innerHeight * devicePixelRatio;
+  cv.style.width = innerWidth+'px'; cv.style.height = innerHeight+'px'; ctx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0); }
+addEventListener('resize', resize); resize();
+
+// bulutlar
+for (let i=0;i<6;i++) S.clouds.push({ x:Math.random()*innerWidth, y:Math.random()*innerHeight*.7, s:.5+Math.random(), v:6+Math.random()*10 });
+
+const $ = id => document.getElementById(id);
+function show(el){ $(el).classList.remove('hidden'); } function hide(el){ $(el).classList.add('hidden'); }
+function toast(msg, ms=1800){ const t=$('toast'); t.textContent=msg; t.style.opacity=1; clearTimeout(t._h); t._h=setTimeout(()=>t.style.opacity=0, ms); }
+
+// ================== SES ==================
+let AC=null;
+function pop(freq=600){ try{ AC=AC||new (window.AudioContext||window.webkitAudioContext)();
+  const o=AC.createOscillator(), g=AC.createGain(); o.connect(g); g.connect(AC.destination);
+  o.frequency.setValueAtTime(freq, AC.currentTime); o.frequency.exponentialRampToValueAtTime(freq*2.2, AC.currentTime+.08);
+  g.gain.setValueAtTime(.25, AC.currentTime); g.gain.exponentialRampToValueAtTime(.001, AC.currentTime+.18);
+  o.start(); o.stop(AC.currentTime+.2);}catch(e){} }
+
+// ================== YÜZ TAKİBİ ==================
+let faceMesh=null, camera=null;
+function ema(prev, next, a){ return prev + (next-prev)*a; }
+
+function onResults(res){
+  if (!res.multiFaceLandmarks || !res.multiFaceLandmarks.length){ S.faceSeen=false; return; }
+  S.faceSeen = true;
+  const lm = res.multiFaceLandmarks[0];
+  const L = lm[234], R = lm[454], N = lm[1], F = lm[10], C = lm[152];
+  const yawRatio = (N.x - L.x) / Math.max(1e-6, (R.x - L.x));   // ~0.5 = düz
+  const pitchRatio = (N.y - F.y) / Math.max(1e-6, (C.y - F.y)); // ~0.45 = düz
+  S.raw.yaw = ema(S.raw.yaw, yawRatio, .35);
+  S.raw.pitch = ema(S.raw.pitch, pitchRatio, .35);
+
+  if (S.calibrated){
+    const sens = parseFloat($('sens').value);
+    let dx = (S.raw.yaw - S.cal.yaw), dy = (S.raw.pitch - S.cal.pitch);
+    if ($('invX').checked) dx = -dx;
+    if ($('invY').checked) dy = -dy;
+    // ayna hissi: başını sağa çevir -> nişangah sağa (varsayılan işaret; ters gelirse checkbox)
+    S.cross.x = innerWidth/2  + (-dx) * sens * innerWidth;
+    S.cross.y = innerHeight/2 + ( dy) * sens * innerHeight;
+    S.cross.x = Math.max(10, Math.min(innerWidth-10, S.cross.x));
+    S.cross.y = Math.max(10, Math.min(innerHeight-10, S.cross.y));
+    // yaklaşık derece kaydı (kaba tahmin: ratio 0.5 sapması ~90°)
+    const yawDeg = dx * 90, pitchDeg = dy * 90;
+    if (yawDeg < 0) S.maxDeg.R = Math.max(S.maxDeg.R, -yawDeg); else S.maxDeg.L = Math.max(S.maxDeg.L, yawDeg);
+    if (pitchDeg < 0) S.maxDeg.U = Math.max(S.maxDeg.U, -pitchDeg); else S.maxDeg.D = Math.max(S.maxDeg.D, pitchDeg);
+  }
+}
+
+async function startCamera(){
+  const video = $('video');
+  faceMesh = new FaceMesh({ locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${f}` });
+  faceMesh.setOptions({ maxNumFaces:1, refineLandmarks:false, minDetectionConfidence:.5, minTrackingConfidence:.5 });
+  faceMesh.onResults(onResults);
+  camera = new Camera(video, {
+    onFrame: async () => { await faceMesh.send({ image: video }); },
+    width: 480, height: 360, facingMode: 'user'
+  });
+  await camera.start();
+  const prev = $('camPreview'); prev.srcObject = video.srcObject; prev.style.display='block'; prev.play().catch(()=>{});
+}
+
+// ================== HEDEFLER ==================
+function spawnTarget(){
+  if (S.targets.length >= MAX_TARGETS) return;
+  const cx = innerWidth/2, cy = innerHeight/2;
+  const maxR = Math.min(innerWidth, innerHeight) * S.spread;
+  const ang = Math.random()*Math.PI*2;
+  const r = maxR * (0.45 + Math.random()*0.55);
+  const m = 60;
+  const x = Math.max(m, Math.min(innerWidth-m,  cx + Math.cos(ang)*r*1.25));
+  const y = Math.max(m+50, Math.min(innerHeight-m, cy + Math.sin(ang)*r));
+  const isBird = S.level >= 2 && Math.random() < 0.35;
+  S.targets.push({
+    x, y, r: isBird ? 34 : 40, type: isBird ? 'bird' : 'balloon',
+    hue: 200 + Math.random()*160, born: performance.now(), dwell: 0,
+    vx: isBird ? (Math.random()<.5?-1:1) * (28 + S.level*7) : 0,
+    vy: isBird ? 0 : -6, wob: Math.random()*Math.PI*2,
+  });
+  S.spawned++;
+}
+
+function updateTargets(dt, now){
+  for (let i = S.targets.length-1; i >= 0; i--){
+    const t = S.targets[i];
+    t.wob += dt*2;
+    t.x += t.vx*dt; t.y += t.vy*dt + Math.sin(t.wob)*0.25;
+    if (t.type==='bird' && (t.x < 50 || t.x > innerWidth-50)) t.vx = -t.vx;
+
+    const d = Math.hypot(S.cross.x - t.x, S.cross.y - t.y);
+    if (d < t.r + 14) t.dwell += dt*1000; else t.dwell = Math.max(0, t.dwell - dt*1600);
+
+    if (t.dwell >= DWELL_MS){ // PATLAT
+      S.hits++; S.score += t.type==='bird' ? 15 : 10;
+      pop(t.type==='bird' ? 800 : 550);
+      for (let p=0;p<14;p++) S.popFx.push({ x:t.x, y:t.y, vx:(Math.random()-.5)*260, vy:(Math.random()-.7)*260, life:.6, hue:t.hue });
+      S.targets.splice(i,1);
+      if (S.hits % 5 === 0) levelUp();
+      continue;
+    }
+    if (now - t.born > TARGET_LIFE) S.targets.splice(i,1); // kaçtı
+  }
+  if (now - S.lastSpawn > (S.targets.length ? 2600 : 900) - S.level*120){ spawnTarget(); S.lastSpawn = now; }
+}
+
+function levelUp(){
+  S.level++; S.spread = Math.min(0.46, S.spread + 0.035);
+  $('lvlPill').textContent = 'Seviye ' + S.level;
+  toast('🎉 Seviye ' + S.level + ' — hedefler biraz daha geniş alanda!');
+}
+
+// ================== ÇİZİM ==================
+function draw(dt, now){
+  const w = innerWidth, h = innerHeight;
+  const g = ctx.createLinearGradient(0,0,0,h);
+  g.addColorStop(0,'#4A90D9'); g.addColorStop(.6,'#87CEEB'); g.addColorStop(1,'#d6effa');
+  ctx.fillStyle = g; ctx.fillRect(0,0,w,h);
+
+  // bulutlar
+  ctx.fillStyle = 'rgba(255,255,255,.85)';
+  for (const c of S.clouds){
+    c.x += c.v*dt; if (c.x > w+90) { c.x = -90; c.y = Math.random()*h*.7; }
+    ctx.beginPath();
+    ctx.arc(c.x, c.y, 22*c.s, 0, 7); ctx.arc(c.x+20*c.s, c.y-10*c.s, 18*c.s, 0, 7); ctx.arc(c.x+40*c.s, c.y, 20*c.s, 0, 7);
+    ctx.fill();
+  }
+
+  // hedefler
+  for (const t of S.targets){
+    ctx.save(); ctx.translate(t.x, t.y);
+    if (t.type === 'balloon'){
+      ctx.strokeStyle='rgba(90,60,30,.5)'; ctx.beginPath(); ctx.moveTo(0, t.r*.95); ctx.quadraticCurveTo(6, t.r*1.5, 0, t.r*1.9); ctx.stroke();
+      const bg = ctx.createRadialGradient(-t.r*.3,-t.r*.35,4, 0,0,t.r);
+      bg.addColorStop(0, `hsl(${t.hue} 90% 78%)`); bg.addColorStop(1, `hsl(${t.hue} 75% 55%)`);
+      ctx.fillStyle = bg;
+      ctx.beginPath(); ctx.ellipse(0,0,t.r*.85,t.r,0,0,7); ctx.fill();
+      ctx.fillStyle = `hsl(${t.hue} 75% 45%)`;
+      ctx.beginPath(); ctx.moveTo(-6,t.r*.92); ctx.lineTo(6,t.r*.92); ctx.lineTo(0,t.r*1.08); ctx.fill();
+    } else {
+      ctx.font = `${t.r*1.6}px serif`; ctx.textAlign='center'; ctx.textBaseline='middle';
+      ctx.save(); if (t.vx<0) ctx.scale(-1,1); ctx.fillText('🐦', 0, 0); ctx.restore();
+    }
+    // dwell halkası
+    if (t.dwell > 0){
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 5; ctx.globalAlpha=.9;
+      ctx.beginPath(); ctx.arc(0, 0, t.r+12, -Math.PI/2, -Math.PI/2 + (t.dwell/DWELL_MS)*Math.PI*2); ctx.stroke();
+      ctx.globalAlpha=1;
+    }
+    ctx.restore();
+  }
+
+  // patlama efektleri
+  for (let i=S.popFx.length-1;i>=0;i--){ const p=S.popFx[i];
+    p.x+=p.vx*dt; p.y+=p.vy*dt; p.vy+=300*dt; p.life-=dt;
+    if (p.life<=0){ S.popFx.splice(i,1); continue; }
+    ctx.globalAlpha = Math.max(0,p.life/.6); ctx.fillStyle = `hsl(${p.hue} 85% 60%)`;
+    ctx.beginPath(); ctx.arc(p.x,p.y,4,0,7); ctx.fill(); ctx.globalAlpha=1;
+  }
+
+  // nişangah
+  const {x,y} = S.cross;
+  ctx.strokeStyle = 'rgba(255,60,60,.95)'; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.arc(x,y,16,0,7); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(x-26,y); ctx.lineTo(x-8,y); ctx.moveTo(x+8,y); ctx.lineTo(x+26,y);
+  ctx.moveTo(x,y-26); ctx.lineTo(x,y-8); ctx.moveTo(x,y+8); ctx.lineTo(x,y+26); ctx.stroke();
+  ctx.fillStyle='rgba(255,60,60,.95)'; ctx.beginPath(); ctx.arc(x,y,3,0,7); ctx.fill();
+
+  if (S.mode==='cam' && !S.faceSeen && S.running){
+    ctx.fillStyle='rgba(0,40,80,.6)'; ctx.fillRect(0,h/2-24,w,48);
+    ctx.fillStyle='#fff'; ctx.font='16px sans-serif'; ctx.textAlign='center';
+    ctx.fillText('Yüz bulunamadı — kameraya bak 📷', w/2, h/2+6);
+  }
+}
+
+// ================== OYUN DÖNGÜSÜ ==================
+let lastT = 0;
+function loop(now){
+  requestAnimationFrame(loop);
+  const dt = Math.min(.05, (now - lastT)/1000); lastT = now;
+  if (!S.running || S.paused) { draw(dt, now); return; }
+
+  S.timeLeft -= dt;
+  if (S.timeLeft <= 0){ endSession(); return; }
+  const m = Math.floor(S.timeLeft/60), s = Math.floor(S.timeLeft%60);
+  $('timePill').textContent = m + ':' + String(s).padStart(2,'0');
+  $('scorePill').textContent = '⭐ ' + S.score;
+
+  updateTargets(dt, now);
+  draw(dt, now);
+}
+requestAnimationFrame(loop);
+
+// ================== AKIŞ ==================
+$('startBtn').onclick = async () => {
+  S.mode = 'cam'; hide('startOverlay'); show('calOverlay');
+  try { await startCamera(); }
+  catch(e){
+    $('calMsg').textContent = 'Kameraya erişilemedi (' + (e.name||'hata') + '). Tarayıcı izni ve HTTPS gerekli. Dokunmatik moda geçebilirsin.';
+    const b=$('calBtn'); b.classList.remove('hidden'); b.textContent='Dokunmatik modda oyna'; b.onclick = startTouch; return;
+  }
+  const wait = setInterval(()=>{
+    if (S.faceSeen){ clearInterval(wait);
+      $('calMsg').textContent = 'Yüz bulundu ✅ Başını dik ve rahat tut, karşıya bak, sonra butona bas.';
+      show('calBtn');
+    }
+  }, 300);
+};
+$('calBtn').onclick = () => {
+  S.cal.yaw = S.raw.yaw; S.cal.pitch = S.raw.pitch; S.calibrated = true;
+  beginGame();
+};
+function startTouch(){
+  S.mode='touch'; S.calibrated=true; hide('startOverlay'); hide('calOverlay'); beginGame();
+  toast('Dokunmatik mod: parmağını sürükleyerek nişan al');
+}
+$('touchBtn').onclick = startTouch;
+
+function beginGame(){
+  hide('calOverlay'); show('hud');
+  Object.assign(S, { running:true, paused:false, score:0, hits:0, spawned:0, level:1, timeLeft:S.duration, spread:.28, targets:[], popFx:[], lastSpawn:0 });
+  S.maxDeg = {L:0,R:0,U:0,D:0};
+  $('lvlPill').textContent='Seviye 1';
+  toast('Başla! Nişangahı hedefin üstünde tut 🎯');
+}
+
+// dokunmatik / fare nişan
+function pointAt(ev){ if (S.mode!=='touch') return;
+  const p = ev.touches ? ev.touches[0] : ev;
+  S.cross.x = p.clientX; S.cross.y = p.clientY;
+}
+addEventListener('touchmove', pointAt, {passive:true});
+addEventListener('touchstart', pointAt, {passive:true});
+addEventListener('mousemove', pointAt);
+
+$('pauseBtn').onclick = () => { if (!S.running) return; S.paused = true; show('pauseOverlay'); };
+$('resumeBtn').onclick = () => { S.paused = false; hide('pauseOverlay'); };
+$('quitBtn').onclick = () => { hide('pauseOverlay'); endSession(); };
+
+function endSession(){
+  S.running = false; hide('hud');
+  $('stScore').textContent = S.score;
+  $('stHits').textContent = S.hits;
+  $('stAcc').textContent = S.spawned ? Math.round(100*S.hits/S.spawned) + '%' : '—';
+  $('stLvl').textContent = S.level;
+  if (S.mode==='cam'){
+    $('stYaw').textContent = Math.round(S.maxDeg.L) + '° / ' + Math.round(S.maxDeg.R) + '°';
+    $('stPitch').textContent = Math.round(S.maxDeg.D) + '° / ' + Math.round(S.maxDeg.U) + '°';
+  }
+  show('endOverlay');
+}
+$('againBtn').onclick = () => { hide('endOverlay'); if (S.mode==='cam') { show('calOverlay'); $('calMsg').textContent='Başını dik tut ve tekrar kalibre et.'; show('calBtn'); $('calBtn').onclick = ()=>{ S.cal.yaw=S.raw.yaw; S.cal.pitch=S.raw.pitch; beginGame(); }; } else beginGame(); };
+</script>
+</body>
+</html>
